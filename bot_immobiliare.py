@@ -15,7 +15,8 @@ FB_PAGE_TOKEN = os.environ.get("FB_PAGE_TOKEN")
 FB_PAGE_ID = os.environ.get("FB_PAGE_ID")
 
 SHEET_ID = "19m1cStsqyCvzz3-AYFJKPnrLPNaDuCXEKM8Fka76-Hc"
-FOLDER_ID = "1MXYsQjbyswrcYxxTYxE3jrO0RznJRHKD" # ID della tua cartella Drive
+# ID ESATTO DELLA TUA CARTELLA DRIVE
+FOLDER_ID = "1MXYsQjbyswrcYxxTYxE3jrO0RznJRHKD"
 
 def get_credentials():
     if not os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'):
@@ -30,12 +31,15 @@ def get_credentials():
     return Credentials.from_service_account_info(info, scopes=scopes)
 
 def scarica_video_da_drive(drive_service, nome_file):
-    print(f"🔍 Cerco il file '{nome_file}' nella cartella Drive...")
+    print(f"🔍 Cerco il file '{nome_file}' nella cartella specifica (ID: {FOLDER_ID})...")
+    
+    # Ricerca mirata ESCLUSIVAMENTE in quella specifica cartella
     query = f"'{FOLDER_ID}' in parents and name = '{nome_file}' and trashed = false"
     risultati = drive_service.files().list(q=query).execute().get('files', [])
     
     if not risultati:
-        print(f"❌ ERRORE: File '{nome_file}' non trovato in Drive.")
+        print(f"❌ ERRORE: File '{nome_file}' non trovato nella cartella specificata.")
+        print("💡 Ricorda: La cartella su Drive DEVE essere condivisa con l'email del Bot come Visualizzatore!")
         return None
         
     video = risultati[0]
@@ -97,7 +101,7 @@ def main():
         data_post = str(row.get('Data', '')).strip()
         nome_video_check = str(row.get('Nome_File_Video', '')).strip()
         
-        # ORA IL BOT CONTROLLA SE C'E' IL NOME DEL VIDEO. SE NON C'E', IGNORA LA RIGA.
+        # ORA IL BOT CONTROLLA SE C'E' IL NOME DEL VIDEO E SE LA DATA È VALIDA
         if pubblicato != 'SI' and data_post and nome_video_check:
             post_non_pubblicati.append((i + 2, row)) # +2 per l'offset di riga
             
@@ -114,10 +118,10 @@ def main():
     
     print(f"🚀 Preparo la pubblicazione del post in data {post['Data']} (Riga {indice_riga}) con file {nome_video}")
     
-    # 1. Scarica il video da Drive
+    # 1. Scarica il video da Drive (PUNTATO DIRETTAMENTE ALLA CARTELLA)
     video_path = scarica_video_da_drive(drive_service, nome_video)
     if not video_path:
-        return # Si ferma se non trova il video nella cartella Drive
+        return # Si ferma se non lo trova
 
     # 2. Pubblica su Telegram
     tg_ok, tg_resp = posta_su_telegram(descrizione, video_path)
