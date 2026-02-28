@@ -2,7 +2,7 @@ name: Bot Pubblicazione Immobiliare
 
 on:
   schedule:
-    # Esegue alle 10:40 UTC (11:40 in Italia in orario invernale, 12:40 in orario estivo)
+    # Esegue alle 10:40 UTC (11:40 ora italiana invernale)
     - cron: '40 10 * * *'
   workflow_dispatch: # Permette di avviarlo manualmente
 
@@ -21,7 +21,8 @@ jobs:
 
     - name: Installa le dipendenze
       run: |
-        pip install requests gspread pandas google-auth
+        python -m pip install --upgrade pip
+        pip install requests gspread pandas google-auth google-api-python-client
 
     - name: Esegui il bot
       env:
