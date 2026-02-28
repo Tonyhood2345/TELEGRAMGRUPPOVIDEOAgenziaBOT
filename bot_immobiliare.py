@@ -67,7 +67,7 @@ def posta_su_telegram(testo, video_path):
 
 def posta_su_facebook(testo, video_path):
     print("🚀 Inviando a Facebook...")
-    # Per i video si usa l'endpoint /videos e il parametro 'description' invece di 'message'
+    # Per i video si usa l'endpoint /videos e il parametro 'description'
     url = f"https://graph.facebook.com/v19.0/{FB_PAGE_ID}/videos"
     
     with open(video_path, 'rb') as video_file:
@@ -91,23 +91,25 @@ def main():
     sheet = client_sheets.open_by_key(SHEET_ID).sheet1
     records = sheet.get_all_records()
     
-    # Trova post da pubblicare
+    # Trova post da pubblicare (salta quelli già pubblicati o senza data)
     post_non_pubblicati = []
     for i, row in enumerate(records):
         pubblicato = str(row.get('Pubblicato', '')).strip().upper()
-        if pubblicato != 'SI':
-            post_non_pubblicati.append((i + 2, row)) # +2 per l'offset di riga in gspread
+        data_post = str(row.get('Data', '')).strip()
+        
+        if pubblicato != 'SI' and data_post:
+            post_non_pubblicati.append((i + 2, row)) # +2 per l'offset di riga
             
     if not post_non_pubblicati:
         print("✅ Nessun nuovo post da pubblicare. Tutti hanno 'SI'.")
         return
 
-    # Ordina per data e prendi il più vecchio
+    # Ordina per data (dal più vecchio) e prendi il primo
     post_non_pubblicati.sort(key=lambda x: datetime.strptime(x[1]['Data'], "%Y-%m-%d"))
     indice_riga, post = post_non_pubblicati[0]
     
     descrizione = post.get('Descrizione', '')
-    nome_video = post.get('Nome_File_Video', '').strip()
+    nome_video = str(post.get('Nome_File_Video', '')).strip()
     
     if not nome_video:
         print("❌ ERRORE: La colonna 'Nome_File_Video' è vuota per questo post!")
@@ -115,7 +117,7 @@ def main():
         
     print(f"🚀 Preparo la pubblicazione del post in data {post['Data']} (Riga {indice_riga})")
     
-    # 1. Scarica il video
+    # 1. Scarica il video da Drive
     video_path = scarica_video_da_drive(drive_service, nome_video)
     if not video_path:
         return # Si ferma se non trova il video
@@ -127,14 +129,18 @@ def main():
     else:
         print(f"❌ Errore Telegram: {tg_resp}")
 
-    # 3. Pubblica su Facebook
-    fb_ok, fb_resp = posta_su_facebook(descrizione, video_path)
-    if fb_ok:
-        print("✅ Pubblicato su Facebook!")
+    # 3. Pubblica su Facebook (se hai configurato i token)
+    if FB_PAGE_TOKEN and FB_PAGE_ID:
+        fb_ok, fb_resp = posta_su_facebook(descrizione, video_path)
+        if fb_ok:
+            print("✅ Pubblicato su Facebook!")
+        else:
+            print(f"❌ Errore Facebook: {fb_resp}")
     else:
-        print(f"❌ Errore Facebook: {fb_resp}")
+        print("⚠️ Token Facebook mancanti, salto la pubblicazione su FB.")
+        fb_ok = False
         
-    # 4. Aggiorna il foglio Google
+    # 4. Aggiorna il foglio Google se almeno uno è andato a buon fine
     if tg_ok or fb_ok:
         intestazioni = sheet.row_values(1)
         if "Pubblicato" in intestazioni:
