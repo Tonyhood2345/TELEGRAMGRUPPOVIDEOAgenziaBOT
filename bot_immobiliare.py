@@ -109,7 +109,7 @@ def main():
     descrizione = post.get('Descrizione', '')
     nome_video = post.get('Nome_File_Video', '').strip()
     
-    if non nome_video:
+    if not nome_video:
         print("❌ ERRORE: La colonna 'Nome_File_Video' è vuota per questo post!")
         return
         
