@@ -15,12 +15,10 @@ CHAT_ID = os.environ.get("CHAT_ID")
 FB_PAGE_TOKEN = os.environ.get("FB_PAGE_TOKEN")
 FB_PAGE_ID = os.environ.get("FB_PAGE_ID")
 
-# CREDENZIALI PER IL SECONDO CANALE YOUTUBE
 YT2_CLIENT_ID = os.environ.get("YT2_CLIENT_ID")
 YT2_CLIENT_SECRET = os.environ.get("YT2_CLIENT_SECRET")
 YT2_REFRESH_TOKEN = os.environ.get("YT2_REFRESH_TOKEN")
 
-# ID GOOGLE SHEET E CARTELLA DRIVE
 SHEET_ID = "19m1cStsqyCvzz3-AYFJKPnrLPNaDuCXEKM8Fka76-Hc"
 FOLDER_ID = "1MXYsQjbyswrcYxxTYxE3jrO0RznJRHKD"
 
@@ -79,7 +77,6 @@ def posta_su_telegram(testo, video_path):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
     with open(video_path, 'rb') as video_file:
         files = {'video': video_file}
-        # Telegram caption max 1024 chars
         caption_tg = testo[:1020] + "..." if len(testo) > 1024 else testo
         data = {'chat_id': CHAT_ID, 'caption': caption_tg, 'parse_mode': 'HTML'}
         r = requests.post(url, files=files, data=data)
@@ -87,6 +84,9 @@ def posta_su_telegram(testo, video_path):
 
 def posta_su_facebook(testo, video_path):
     print("🚀 Invio a Facebook e Instagram...")
+    # --- LOG DI CONTROLLO ---
+    print(f"📝 TESTO INVIATO A FB:\n{testo}") 
+    # ------------------------
     url = f"https://graph.facebook.com/v19.0/{FB_PAGE_ID}/videos"
     with open(video_path, 'rb') as video_file:
         files = {'source': video_file}
@@ -118,7 +118,9 @@ def main():
 
     post_non_pubblicati.sort(key=lambda x: datetime.strptime(x[1]['Data'], "%Y-%m-%d"))
     indice_riga, post = post_non_pubblicati[0]
-    desc_base = post.get('Descrizione', '')
+    
+    # Assicuriamoci che desc_base sia una stringa pulita
+    desc_base = str(post.get('Descrizione', '')).strip()
     nome_video = str(post.get('Nome_File_Video', '')).strip()
     
     video_path = scarica_video_da_drive(drive_service, nome_video)
@@ -129,30 +131,36 @@ def main():
     if youtube_service:
         titolo_yt = f"Novità Immobiliare - {post['Data']}" 
         v_id = posta_su_youtube(youtube_service, video_path, titolo_yt, desc_base)
-        if v_id: yt_link = f"https://youtu.be/{v_id}"
+        if v_id: 
+            yt_link = f"https://youtu.be/{v_id}"
+            print(f"✅ Link generato: {yt_link}")
 
     # --- COSTRUZIONE TESTO CON LINK ---
     cta_yt = f"\n\n📺 Guarda il video su YouTube 👇\n🔗 {yt_link}" if yt_link else ""
     
-    # Testo per Telegram (tagliato se serve)
+    # Testo Telegram
     testo_tg = desc_base
     if yt_link:
-        max_tg = 1024 - len(cta_yt)
-        testo_tg = (desc_base[:max_tg-3] + "...") if len(desc_base) > max_tg else desc_base
+        max_tg = 1020 - len(cta_yt)
+        testo_tg = (desc_base[:max_tg] + "...") if len(desc_base) > max_tg else desc_base
         testo_tg += cta_yt
 
-    # Testo per Facebook (più permissivo)
+    # Testo Facebook (Descrizione completa + Link)
     testo_fb = desc_base + cta_yt
 
     # --- PUBBLICAZIONE ---
     tg_ok, _ = posta_su_telegram(testo_tg, video_path)
+    
+    fb_ok = False
     if FB_PAGE_TOKEN and FB_PAGE_ID:
-        fb_ok, _ = posta_su_facebook(testo_fb, video_path)
-    else:
-        fb_ok = False
+        fb_ok, fb_resp = posta_su_facebook(testo_fb, video_path)
+        if fb_ok:
+            print("✅ Facebook OK!")
+        else:
+            print(f"❌ Errore Facebook: {fb_resp}")
         
     # --- AGGIORNAMENTO FOGLIO ---
-    if tg_ok or fb_ok or yt_link:
+    if tg_ok or fb_ok or (yt_link != ""):
         headers = sheet.row_values(1)
         if "Pubblicato" in headers:
             col = headers.index("Pubblicato") + 1
