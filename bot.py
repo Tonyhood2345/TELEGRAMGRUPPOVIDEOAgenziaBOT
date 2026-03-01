@@ -2,7 +2,6 @@ import os
 import json
 import requests
 import gspread
-import io
 import base64
 from google.oauth2.service_account import Credentials
 from google.oauth2.credentials import Credentials as OauthCredentials
@@ -21,17 +20,15 @@ YT2_CLIENT_SECRET = os.environ.get("YT2_CLIENT_SECRET")
 YT2_REFRESH_TOKEN = os.environ.get("YT2_REFRESH_TOKEN")
 
 # DATI WORDPRESS
-WP_SITE_URL = "https://www.immobiliaregiancani.it"
-WP_API_URL = f"{WP_SITE_URL}/wp-json/wp/v2/posts"
-WP_USER = "Antonio Giancani"
-WP_PASSWORD = os.environ.get("WP_PASSWORD")
+WP_USER = "Antonio Giancani" 
+WP_PASSWORD = os.environ.get("WP_PASSWORD") # I 24 caratteri salvati nei Secrets
+WP_API_URL = "https://www.immobiliaregiancani.it/wp-json/wp/v2/posts"
 
 SHEET_ID = "19m1cStsqyCvzz3-AYFJKPnrLPNaDuCXEKM8Fka76-Hc"
 FOLDER_ID = "1MXYsQjbyswrcYxxTYxE3jrO0RznJRHKD"
 
 def get_credentials():
     if not os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'):
-        print("❌ ERRORE: GOOGLE_APPLICATION_CREDENTIALS mancante.")
         return None
     info = json.loads(os.environ['GOOGLE_APPLICATION_CREDENTIALS'])
     scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
@@ -66,36 +63,30 @@ def posta_su_youtube(youtube_service, video_path, titolo, descrizione):
     return response['id']
 
 def posta_su_wordpress(titolo, testo, yt_url):
-    print("🚀 Pubblicazione su WordPress...")
-    video_embed = f'\n\n<figure class="wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube"><div class="wp-block-embed__wrapper">https://www.youtube.com/watch?v={yt_url.split("/")[-1]}</div></figure>'
-    contenuto_finale = testo + video_embed
-    
-    credentials = f"{WP_USER}:{WP_PASSWORD}"
-    token = base64.b64encode(credentials.encode()).decode()
-    headers = {'Authorization': f'Basic {token}', 'Content-Type': 'application/json'}
-    
-    payload = {'title': titolo, 'content': contenuto_finale, 'status': 'publish'}
-    r = requests.post(WP_API_URL, headers=headers, json=payload)
-    if r.status_code == 201:
-        return r.json().get('link') # Restituisce il link dell'articolo creato
-    return None
+    if not WP_PASSWORD: return None
+    try:
+        video_id = yt_url.split("/")[-1]
+        video_embed = f'\n\n<figure class="wp-block-embed is-type-video is-provider-youtube"><div class="wp-block-embed__wrapper">https://www.youtube.com/watch?v={video_id}</div></figure>'
+        auth_ptr = f"{WP_USER}:{WP_PASSWORD}"
+        auth_base64 = base64.b64encode(auth_ptr.encode()).decode()
+        headers = {'Authorization': f'Basic {auth_base64}', 'Content-Type': 'application/json'}
+        payload = {'title': titolo, 'content': testo + video_embed, 'status': 'publish'}
+        r = requests.post(WP_API_URL, headers=headers, json=payload, timeout=30)
+        return r.json().get('link') if r.status_code == 201 else None
+    except: return None
 
 def posta_su_telegram(testo, video_path):
-    print("🚀 Invio a Telegram con Link...")
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
     with open(video_path, 'rb') as v:
         caption = testo[:1020] if len(testo) > 1024 else testo
         data = {'chat_id': CHAT_ID, 'caption': caption, 'parse_mode': 'HTML'}
-        r = requests.post(url, files={'video': v}, data=data)
-    return r.status_code == 200
+        requests.post(url, files={'video': v}, data=data)
 
 def posta_su_facebook(testo, video_path):
-    print("🚀 Invio a Facebook...")
     url = f"https://graph.facebook.com/v19.0/{FB_PAGE_ID}/videos"
     with open(video_path, 'rb') as v:
         data = {'description': testo, 'access_token': FB_PAGE_TOKEN}
-        r = requests.post(url, files={'source': v}, data=data)
-    return r.status_code == 200
+        requests.post(url, files={'source': v}, data=data)
 
 def main():
     creds = get_credentials()
@@ -122,35 +113,28 @@ def main():
     video_path = scarica_video_da_drive(drive_service, nome_video)
     if not video_path: return
 
-    # 1. CARICAMENTO YOUTUBE
+    # 1. YouTube
     yt_link = ""
     if youtube_service:
-        v_id = posta_su_youtube(youtube_service, video_path, f"Immobile Giancani - {post['Data']}", desc_base)
+        v_id = posta_su_youtube(youtube_service, video_path, f"Immobile {post['Data']}", desc_base)
         yt_link = f"https://youtu.be/{v_id}"
 
-    # 2. PUBBLICAZIONE WORDPRESS
-    wp_link = ""
-    if WP_PASSWORD and yt_link:
-        wp_link = posta_su_wordpress(f"Nuova Proposta Immobiliare: {post['Data']}", desc_base, yt_link)
+    # 2. WordPress
+    wp_link = posta_su_wordpress(f"Nuova Proposta Immobiliare - {post['Data']}", desc_base, yt_link)
 
-    # 3. PREPARAZIONE TESTO FINALE PER SOCIAL (CON TUTTI I LINK)
-    testo_con_link = desc_base
-    if yt_link:
-        testo_con_link += f"\n\n📺 <b>Video HD su YouTube:</b>\n{yt_link}"
-    if wp_link:
-        testo_con_link += f"\n\n🌐 <b>Dettagli sul sito:</b>\n{wp_link}"
+    # 3. Costruzione Testo Finale
+    testo_finale = desc_base
+    if yt_link: testo_finale += f"\n\n📺 Video YouTube:\n{yt_link}"
+    if wp_link: testo_finale += f"\n\n🌐 Dettagli sul sito:\n{wp_link}"
+    else: testo_finale += f"\n\n🌐 Visita il sito:\nhttps://www.immobiliaregiancani.it"
 
-    # 4. INVIO SOCIAL
-    tg_ok = posta_su_telegram(testo_con_link, video_path)
-    fb_ok = posta_su_facebook(testo_con_link, video_path)
+    # 4. Social
+    posta_su_telegram(testo_finale, video_path)
+    posta_su_facebook(testo_finale, video_path)
 
-    # 5. AGGIORNAMENTO FOGLIO
-    if tg_ok or fb_ok or wp_link:
-        headers = sheet.row_values(1)
-        if "Pubblicato" in headers:
-            sheet.update_cell(idx, headers.index("Pubblicato") + 1, "SI")
-            print(f"✅ Tutto ok! Telegram, FB, YT e WordPress aggiornati.")
-
+    # 5. Chiudi
+    headers = sheet.row_values(1)
+    sheet.update_cell(idx, headers.index("Pubblicato") + 1, "SI")
     if os.path.exists(video_path): os.remove(video_path)
 
 if __name__ == "__main__":
