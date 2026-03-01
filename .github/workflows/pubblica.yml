@@ -1,34 +1,35 @@
-name: Bot Pubblicazione Immobiliare
+name: Pubblicazione Automatica Multi-Social
 
 on:
   schedule:
-    # Esegue alle 10:40 UTC (11:40 ora italiana invernale)
-    - cron: '40 10 * * *'
-  workflow_dispatch: # Permette di avviarlo manualmente
+    - cron: '30 9 * * *'  # Esempio orario
+  workflow_dispatch:      # Per farlo partire a mano
 
 jobs:
-  pubblica:
+  build:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout del codice
-      uses: actions/checkout@v3
+      - name: Checkout codice
+        uses: actions/checkout@v3
 
-    - name: Configura Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
 
-    - name: Installa le dipendenze
-      run: |
-        python -m pip install --upgrade pip
-        pip install requests gspread pandas google-auth google-api-python-client
+      - name: Install dependencies
+        run: |
+          pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib requests pandas gspread openpyxl
 
-    - name: Esegui il bot
-      env:
-        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-        CHAT_ID: ${{ secrets.CHAT_ID }}
-        FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
-        FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
-        GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
-      run: python bot_immobiliare.py
+      - name: Esegui Bot
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          # 🟢 LE NUOVE CHIAVI PER IL SECONDO CANALE:
+          YT2_CLIENT_ID: ${{ secrets.YT2_CLIENT_ID }}
+          YT2_CLIENT_SECRET: ${{ secrets.YT2_CLIENT_SECRET }}
+          YT2_REFRESH_TOKEN: ${{ secrets.YT2_REFRESH_TOKEN }}
+        run: python bot.py
