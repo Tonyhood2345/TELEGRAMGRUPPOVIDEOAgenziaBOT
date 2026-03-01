@@ -1,15 +1,15 @@
-name: Pubblicazione Automatica Multi-Social
+name: Bot Immobiliare Multi-Social
 
 on:
   schedule:
-    - cron: '30 9 * * *'  # Esempio orario
-  workflow_dispatch:      # Per farlo partire a mano
+    - cron: '30 9 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout codice
+      - name: Checkout
         uses: actions/checkout@v3
 
       - name: Setup Python
@@ -17,9 +17,8 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
-        run: |
-          pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib requests pandas gspread openpyxl
+      - name: Install Dependencies
+        run: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib requests gspread
 
       - name: Esegui Bot
         env:
@@ -28,8 +27,8 @@ jobs:
           CHAT_ID: ${{ secrets.CHAT_ID }}
           FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
-          # 🟢 LE NUOVE CHIAVI PER IL SECONDO CANALE:
           YT2_CLIENT_ID: ${{ secrets.YT2_CLIENT_ID }}
           YT2_CLIENT_SECRET: ${{ secrets.YT2_CLIENT_SECRET }}
           YT2_REFRESH_TOKEN: ${{ secrets.YT2_REFRESH_TOKEN }}
+          WP_PASSWORD: ${{ secrets.WP_PASSWORD }}
         run: python bot.py
