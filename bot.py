@@ -21,9 +21,10 @@ YT2_CLIENT_SECRET = os.environ.get("YT2_CLIENT_SECRET")
 YT2_REFRESH_TOKEN = os.environ.get("YT2_REFRESH_TOKEN")
 
 # DATI WORDPRESS
-WP_URL = "https://www.immobiliaregiancani.it/wp-json/wp/v2/posts"
+WP_SITE_URL = "https://www.immobiliaregiancani.it"
+WP_API_URL = f"{WP_SITE_URL}/wp-json/wp/v2/posts"
 WP_USER = "Antonio Giancani"
-WP_PASSWORD = os.environ.get("WP_PASSWORD") # nb6T kBzJ 2AKr 6wTW cKDg msII
+WP_PASSWORD = os.environ.get("WP_PASSWORD")
 
 SHEET_ID = "19m1cStsqyCvzz3-AYFJKPnrLPNaDuCXEKM8Fka76-Hc"
 FOLDER_ID = "1MXYsQjbyswrcYxxTYxE3jrO0RznJRHKD"
@@ -66,8 +67,7 @@ def posta_su_youtube(youtube_service, video_path, titolo, descrizione):
 
 def posta_su_wordpress(titolo, testo, yt_url):
     print("🚀 Pubblicazione su WordPress...")
-    # Creiamo l'incorporamento del video YouTube nel testo
-    video_embed = f'\n\n<figure class="wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">https://www.youtube.com/watch?v={yt_url.split("/")[-1]}</div></figure>'
+    video_embed = f'\n\n<figure class="wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube"><div class="wp-block-embed__wrapper">https://www.youtube.com/watch?v={yt_url.split("/")[-1]}</div></figure>'
     contenuto_finale = testo + video_embed
     
     credentials = f"{WP_USER}:{WP_PASSWORD}"
@@ -75,10 +75,13 @@ def posta_su_wordpress(titolo, testo, yt_url):
     headers = {'Authorization': f'Basic {token}', 'Content-Type': 'application/json'}
     
     payload = {'title': titolo, 'content': contenuto_finale, 'status': 'publish'}
-    r = requests.post(WP_URL, headers=headers, json=payload)
-    return r.status_code == 201
+    r = requests.post(WP_API_URL, headers=headers, json=payload)
+    if r.status_code == 201:
+        return r.json().get('link') # Restituisce il link dell'articolo creato
+    return None
 
 def posta_su_telegram(testo, video_path):
+    print("🚀 Invio a Telegram con Link...")
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
     with open(video_path, 'rb') as v:
         caption = testo[:1020] if len(testo) > 1024 else testo
@@ -87,9 +90,10 @@ def posta_su_telegram(testo, video_path):
     return r.status_code == 200
 
 def posta_su_facebook(testo, video_path):
+    print("🚀 Invio a Facebook...")
     url = f"https://graph.facebook.com/v19.0/{FB_PAGE_ID}/videos"
     with open(video_path, 'rb') as v:
-        data = {'description': testo.encode('utf-8'), 'access_token': FB_PAGE_TOKEN}
+        data = {'description': testo, 'access_token': FB_PAGE_TOKEN}
         r = requests.post(url, files={'source': v}, data=data)
     return r.status_code == 200
 
@@ -110,7 +114,7 @@ def main():
             
     if not post_non_pubblicati: return
 
-    post_non_pubblicati.sort(key=lambda x: datetime.strptime(x[1]['Data'], "%Y-%m-%d"))
+    post_non_pubblicati.sort(key=lambda x: datetime.strptime(str(x[1]['Data']), "%Y-%m-%d"))
     idx, post = post_non_pubblicati[0]
     desc_base = str(post.get('Descrizione', '')).strip()
     nome_video = str(post.get('Nome_File_Video', '')).strip()
@@ -118,28 +122,34 @@ def main():
     video_path = scarica_video_da_drive(drive_service, nome_video)
     if not video_path: return
 
-    # 1. YOUTUBE
+    # 1. CARICAMENTO YOUTUBE
     yt_link = ""
     if youtube_service:
-        v_id = posta_su_youtube(youtube_service, video_path, f"Immobile {post['Data']}", desc_base)
+        v_id = posta_su_youtube(youtube_service, video_path, f"Immobile Giancani - {post['Data']}", desc_base)
         yt_link = f"https://youtu.be/{v_id}"
 
-    # 2. WORDPRESS
-    wp_ok = False
+    # 2. PUBBLICAZIONE WORDPRESS
+    wp_link = ""
     if WP_PASSWORD and yt_link:
-        wp_ok = posta_su_wordpress(f"Nuova Proposta Immobiliare - {post['Data']}", desc_base, yt_link)
+        wp_link = posta_su_wordpress(f"Nuova Proposta Immobiliare: {post['Data']}", desc_base, yt_link)
 
-    # 3. SOCIAL
-    testo_social = desc_base + (f"\n\n📺 Video completo: {yt_link}" if yt_link else "")
-    tg_ok = posta_su_telegram(testo_social, video_path)
-    fb_ok = posta_su_facebook(testo_social, video_path)
+    # 3. PREPARAZIONE TESTO FINALE PER SOCIAL (CON TUTTI I LINK)
+    testo_con_link = desc_base
+    if yt_link:
+        testo_con_link += f"\n\n📺 <b>Video HD su YouTube:</b>\n{yt_link}"
+    if wp_link:
+        testo_con_link += f"\n\n🌐 <b>Dettagli sul sito:</b>\n{wp_link}"
 
-    # 4. AGGIORNAMENTO FOGLIO
-    if tg_ok or fb_ok or wp_ok:
+    # 4. INVIO SOCIAL
+    tg_ok = posta_su_telegram(testo_con_link, video_path)
+    fb_ok = posta_su_facebook(testo_con_link, video_path)
+
+    # 5. AGGIORNAMENTO FOGLIO
+    if tg_ok or fb_ok or wp_link:
         headers = sheet.row_values(1)
         if "Pubblicato" in headers:
             sheet.update_cell(idx, headers.index("Pubblicato") + 1, "SI")
-            print(f"✅ Tutto pubblicato e foglio aggiornato!")
+            print(f"✅ Tutto ok! Telegram, FB, YT e WordPress aggiornati.")
 
     if os.path.exists(video_path): os.remove(video_path)
 
