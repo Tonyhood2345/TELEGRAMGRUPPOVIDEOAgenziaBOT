@@ -1,34 +1,10 @@
-name: Bot Pubblicazione Immobiliare
-
-on:
-  workflow_dispatch: # Questo ti permette di avviarlo a mano con un pulsante su GitHub
-  schedule:
-    - cron: '0 8,13,18 * * *' # Si avvia in automatico alle 8:00, 13:00 e 18:00 (orario UTC)
-
-jobs:
-  esegui-bot:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout del codice
-        uses: actions/checkout@v3
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Installa le librerie necessarie
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Esegui il bot Python
+- name: Esegui il bot Python
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           WP_PASSWORD: ${{ secrets.WP_PASSWORD }}
-          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
+          # GUARDA QUI SOTTO: la variabile a sinistra ha _JSON, quella a destra no!
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
           YT2_CLIENT_ID: ${{ secrets.YT2_CLIENT_ID }}
           YT2_CLIENT_SECRET: ${{ secrets.YT2_CLIENT_SECRET }}
           YT2_REFRESH_TOKEN: ${{ secrets.YT2_REFRESH_TOKEN }}
