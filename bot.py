@@ -19,121 +19,129 @@ YT2_CLIENT_ID = os.environ.get("YT2_CLIENT_ID")
 YT2_CLIENT_SECRET = os.environ.get("YT2_CLIENT_SECRET")
 YT2_REFRESH_TOKEN = os.environ.get("YT2_REFRESH_TOKEN")
 WP_PASSWORD = os.environ.get("WP_PASSWORD") 
-
-# DATI GOOGLE (Assicurati di caricare il file secrets.json su GitHub)
 GOOGLE_SECRETS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
 
-# CONFIGURAZIONE WORDPRESS
 WP_USER = "Antonio Giancani" 
 WP_API_URL = "https://www.immobiliaregiancani.it/wp-json/wp/v2/property"
-
 SHEET_ID = "19m1cStsqyCvzz3-AYFJKPnrLPNaDuCXEKM8Fka76-Hc"
-FOLDER_ID = "1MXYsQjbyswrcYxxTYxE3jrO0RznJRHKD"
 
-# --- FUNZIONI DI SUPPORTO ---
+# --- FUNZIONI DI AUTENTICAZIONE ---
 
-def get_gspread_client():
+def get_google_services():
     creds_dict = json.loads(GOOGLE_SECRETS)
-    creds = Credentials.from_service_account_info(creds_dict, scopes=[
+    creds_gspread = Credentials.from_service_account_info(creds_dict, scopes=[
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ])
-    return gspread.authorize(creds), creds
+    
+    # Credenziali OAuth2 per YouTube (richiedono refresh token)
+    creds_yt = OauthCredentials(
+        token=None,
+        refresh_token=YT2_REFRESH_TOKEN,
+        client_id=YT2_CLIENT_ID,
+        client_secret=YT2_CLIENT_SECRET,
+        token_uri="https://oauth2.googleapis.com/token"
+    )
+    
+    gc = gspread.authorize(creds_gspread)
+    drive = build('drive', 'v3', credentials=creds_gspread)
+    youtube = build('youtube', 'v3', credentials=creds_yt)
+    
+    return gc, drive, youtube
+
+# --- FUNZIONI DI PUBBLICAZIONE ---
+
+def posta_su_youtube(youtube, file_path, titolo, descrizione):
+    try:
+        print(f"🎬 Caricamento su YouTube: {titolo}")
+        body = {
+            'snippet': {'title': titolo, 'description': descrizione, 'tags': ['immobiliare', 'casa', 'vendita']},
+            'status': {'privacyStatus': 'public', 'selfDeclaredMadeForKids': False}
+        }
+        insert_request = youtube.videos().insert(
+            part='snippet,status',
+            body=body,
+            media_body=MediaFileUpload(file_path, chunksize=-1, resumable=True)
+        )
+        response = insert_request.execute()
+        return f"https://www.youtube.com/watch?v={response['id']}"
+    except Exception as e:
+        print(f"❌ Errore YouTube: {e}")
+        return None
 
 def posta_su_wordpress_ere(titolo, testo, yt_url):
     if not WP_PASSWORD: return None
     try:
-        print(f"🚀 Pubblicazione su WordPress: {titolo}")
         video_id = yt_url.split("v=")[-1] if "v=" in yt_url else yt_url.split("/")[-1]
         video_html = f'\n\n<iframe width="560" height="315" src="https://www.youtube.com/embed/{video_id}" frameborder="0" allowfullscreen></iframe>\n\n'
-        
         auth_ptr = f"{WP_USER}:{WP_PASSWORD}"
         auth_base64 = base64.b64encode(auth_ptr.encode()).decode()
         headers = {'Authorization': f'Basic {auth_base64}', 'Content-Type': 'application/json'}
-        
-        payload = {
-            'title': titolo,
-            'content': testo + video_html,
-            'status': 'publish'
-        }
+        payload = {'title': titolo, 'content': testo + video_html, 'status': 'publish'}
         r = requests.post(WP_API_URL, headers=headers, json=payload, timeout=30)
         return r.json().get('link') if r.status_code == 201 else None
     except Exception as e:
         print(f"❌ Errore WP: {e}")
         return None
 
-def scarica_video_da_drive(drive_service, file_id, output_name):
-    try:
-        request = drive_service.files().get_media(fileId=file_id)
-        with open(output_name, "wb") as f:
-            f.write(request.execute())
-        return output_name
-    except Exception as e:
-        print(f"❌ Errore download Drive: {e}")
-        return None
-
-def posta_su_telegram(testo, video_path):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
-    with open(video_path, "rb") as video:
-        requests.post(url, data={"chat_id": CHAT_ID, "caption": testo, "parse_mode": "HTML"}, files={"video": video})
-
 # --- CORE DEL BOT ---
 
 def main():
-    client, creds = get_gspread_client()
-    drive_service = build('drive', 'v3', credentials=creds)
-    sheet = client.open_by_key(SHEET_ID).sheet1
+    gc, drive_service, youtube_service = get_google_services()
+    sheet = gc.open_by_key(SHEET_ID).sheet1
     records = sheet.get_all_records()
 
-    print(f"🧐 Controllo {len(records)} righe su Google Sheets...")
+    # Trova l'indice della colonna "Pubblicato" (es. se è la 5ª colonna)
+    # È meglio cercarla dinamicamente per evitare errori se sposti le colonne
+    headers = sheet.row_values(1)
+    try:
+        col_pub_idx = headers.index("Pubblicato") + 1
+    except ValueError:
+        print("❌ Errore: Colonna 'Pubblicato' non trovata nel foglio!")
+        return
 
-    # IL CICLO CHE MANCAVA (Riga 71 risolta)
-    for i, post in enumerate(records, start=2): # Partiamo da riga 2 (sotto intestazione)
-        # Controlla se è già stato pubblicato
+    for i, post in enumerate(records, start=2):
         if str(post.get("Pubblicato", "")).upper() == "SI":
             continue
 
-        print(f"🆕 Elaborazione riga {i}: {post.get('Titolo', 'Senza Titolo')}")
-
-        # Estrai dati dal foglio
+        print(f"🆕 Elaborazione riga {i}: {post.get('Titolo', 'Nuova Proposta')}")
+        
         video_id_drive = post.get("ID_Video_Drive")
-        desc_base = post.get("Descrizione", "Nuova Proposta Immobiliare")
+        desc_base = post.get("Descrizione", "")
         data_sheet = post.get("Data", datetime.now().strftime("%d/%m/%Y"))
-        video_local = f"video_{i}.mp4"
+        titolo_video = f"Casa a Favara - {data_sheet}"
+        video_local = f"temp_video_{i}.mp4"
 
-        # 1. Scarica Video
-        if video_id_drive:
-            video_path = scarica_video_da_drive(drive_service, video_id_drive, video_local)
-        else:
+        # 1. Download da Drive
+        try:
+            request = drive_service.files().get_media(fileId=video_id_drive)
+            with open(video_local, "wb") as f:
+                f.write(request.execute())
+        except Exception as e:
+            print(f"❌ Errore download: {e}")
             continue
 
-        if not video_path: continue
+        # 2. YouTube Reale
+        yt_link = posta_su_youtube(youtube_service, video_local, titolo_video, desc_base)
+        if not yt_link: continue
 
-        # 2. (SIMULAZIONE) Link YouTube 
-        # Qui andrebbe la tua funzione posta_su_youtube(video_path)
-        yt_link = "https://www.youtube.com/watch?v=esempio" 
+        # 3. WordPress (ERE)
+        wp_link = posta_su_wordpress_ere(f"Immobile del {data_sheet}", desc_base, yt_link)
 
-        # 3. PUBBLICAZIONE WORDPRESS (Risolto NameError post['Data'])
-        titolo_wp = f"Proposta Immobiliare del {data_sheet}"
-        wp_link = posta_su_wordpress_ere(titolo_wp, desc_base, yt_link)
+        # 4. Social (Telegram esempio)
+        testo_social = f"🏠 <b>Nuova Proposta {data_sheet}</b>\n\n{desc_base}\n\n📺 YouTube: {yt_link}"
+        if wp_link: testo_social += f"\n🌐 Sito: {wp_link}"
+        
+        # Funzione invio telegram (assunta definita come nel tuo post)
+        # posta_su_telegram(testo_social, video_local)
 
-        # 4. COSTRUZIONE TESTO SOCIAL
-        testo_social = f"🏠 <b>{titolo_wp}</b>\n\n{desc_base}"
-        if yt_link: testo_social += f"\n\n📺 Video HD: {yt_link}"
-        if wp_link: testo_social += f"\n\n🌐 Dettagli: {wp_link}"
+        # 5. AGGIORNAMENTO FOGLIO (Fondamentale per l'autonomia)
+        sheet.update_cell(i, col_pub_idx, "SI")
+        print(f"✅ Riga {i} completata e segnata come SI.")
 
-        # 5. INVIO SOCIAL
-        posta_su_telegram(testo_social, video_path)
-        # posta_su_facebook(testo_social, video_path) # Attiva se configurato
-
-        # 6. AGGIORNAMENTO FOGLIO (Autonomia)
-        # Supponendo che "Pubblicato" sia nella Colonna E (indice 5)
-        # sheet.update_cell(i, 5, "SI") 
-        print(f"✅ Riga {i} completata!")
-
-        # Pulizia file temporaneo
-        if os.path.exists(video_local):
-            os.remove(video_local)
+        # Pulizia
+        if os.path.exists(video_local): os.remove(video_local)
+        time.sleep(5) # Piccola pausa per evitare limiti API
 
 if __name__ == "__main__":
     main()
