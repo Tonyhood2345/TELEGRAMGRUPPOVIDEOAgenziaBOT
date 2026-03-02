@@ -14,17 +14,19 @@ from datetime import datetime
 # --- CONFIGURAZIONE SEGRETI ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
-FB_PAGE_TOKEN = os.environ.get("FB_PAGE_TOKEN")
-FB_PAGE_ID = os.environ.get("FB_PAGE_ID")
+WP_PASSWORD = os.environ.get("WP_PASSWORD")
+GOOGLE_SECRETS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
 YT2_CLIENT_ID = os.environ.get("YT2_CLIENT_ID")
 YT2_CLIENT_SECRET = os.environ.get("YT2_CLIENT_SECRET")
 YT2_REFRESH_TOKEN = os.environ.get("YT2_REFRESH_TOKEN")
-WP_PASSWORD = os.environ.get("WP_PASSWORD")
-GOOGLE_SECRETS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
 
 WP_USER = "Antonio Giancani"
 WP_API_URL = "https://www.immobiliaregiancani.it/wp-json/wp/v2/property"
 SHEET_ID = "19m1cStsqyCvzz3-AYFJKPnrLPNaDuCXEKM8Fka76-Hc"
+
+# --- COLONNE REALI DEL FOGLIO ---
+# Tipo | Data | Ora | Tipologia | Descrizione | Like | Commenti | Condivisioni
+# Engagement | Anteprima | Link | Nome_File_Video | Pubblicato
 
 
 # --- VALIDAZIONE SECRETS ALL'AVVIO ---
@@ -39,19 +41,23 @@ def validate_secrets():
     if missing:
         raise EnvironmentError(
             f"❌ Variabili d'ambiente mancanti: {', '.join(missing)}\n"
-            "Controlla i Secrets nelle impostazioni del repository GitHub."
+            "Vai su GitHub → Settings → Secrets and variables → Actions\n"
+            "e aggiungi i secrets mancanti."
         )
-    # Verifica che GOOGLE_SECRETS sia un JSON valido
     try:
         json.loads(GOOGLE_SECRETS)
     except json.JSONDecodeError as e:
-        raise ValueError(f"❌ GOOGLE_APPLICATION_CREDENTIALS_JSON non è un JSON valido: {e}")
+        raise ValueError(
+            f"❌ GOOGLE_APPLICATION_CREDENTIALS_JSON non è un JSON valido: {e}\n"
+            "Assicurati di incollare il contenuto completo del file .json della service account."
+        )
     print("✅ Tutti i secrets sono presenti e validi.")
 
 
-# --- FUNZIONI DI AUTENTICAZIONE ---
+# --- AUTENTICAZIONE GOOGLE ---
 def get_google_services():
     creds_dict = json.loads(GOOGLE_SECRETS)
+
     creds_gspread = Credentials.from_service_account_info(creds_dict, scopes=[
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
@@ -72,7 +78,37 @@ def get_google_services():
     return gc, drive, youtube
 
 
-# --- FUNZIONI DI PUBBLICAZIONE ---
+# --- CERCA FILE SU DRIVE PER NOME ---
+def cerca_id_drive_per_nome(drive_service, nome_file):
+    """
+    Cerca il file su Google Drive per nome (es. 'Video_Riga_002.mp4')
+    e restituisce il suo ID Drive.
+    """
+    try:
+        nome_escaped = nome_file.replace("'", "\\'")
+        query = f"name = '{nome_escaped}' and trashed = false"
+        result = drive_service.files().list(
+            q=query,
+            spaces='drive',
+            fields='files(id, name)',
+            pageSize=1
+        ).execute()
+
+        files = result.get('files', [])
+        if not files:
+            print(f"⚠️ File '{nome_file}' non trovato su Google Drive.")
+            return None
+
+        file_id = files[0]['id']
+        print(f"✅ Trovato su Drive: '{nome_file}' → ID: {file_id}")
+        return file_id
+
+    except Exception as e:
+        print(f"❌ Errore ricerca Drive per '{nome_file}': {e}")
+        return None
+
+
+# --- PUBBLICAZIONE YOUTUBE ---
 def posta_su_youtube(youtube, file_path, titolo, descrizione):
     try:
         print(f"🎬 Caricamento su YouTube: {titolo}")
@@ -80,7 +116,7 @@ def posta_su_youtube(youtube, file_path, titolo, descrizione):
             'snippet': {
                 'title': titolo,
                 'description': descrizione,
-                'tags': ['immobiliare', 'casa', 'vendita']
+                'tags': ['immobiliare', 'casa', 'vendita', 'Favara', 'Sicilia']
             },
             'status': {
                 'privacyStatus': 'public',
@@ -101,7 +137,8 @@ def posta_su_youtube(youtube, file_path, titolo, descrizione):
         return None
 
 
-def posta_su_wordpress_ere(titolo, testo, yt_url):
+# --- PUBBLICAZIONE WORDPRESS ---
+def posta_su_wordpress(titolo, testo, yt_url):
     if not WP_PASSWORD:
         print("⚠️ WP_PASSWORD non impostata, salto WordPress.")
         return None
@@ -136,6 +173,7 @@ def posta_su_wordpress_ere(titolo, testo, yt_url):
         return None
 
 
+# --- PUBBLICAZIONE TELEGRAM ---
 def posta_su_telegram(testo, video_path=None):
     if not TELEGRAM_TOKEN or not CHAT_ID:
         print("⚠️ TELEGRAM_TOKEN o CHAT_ID non impostati, salto Telegram.")
@@ -144,10 +182,19 @@ def posta_su_telegram(testo, video_path=None):
         if video_path and os.path.exists(video_path):
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
             with open(video_path, "rb") as f:
-                r = requests.post(url, data={"chat_id": CHAT_ID, "caption": testo, "parse_mode": "HTML"}, files={"video": f}, timeout=120)
+                r = requests.post(
+                    url,
+                    data={"chat_id": CHAT_ID, "caption": testo[:1024], "parse_mode": "HTML"},
+                    files={"video": f},
+                    timeout=120
+                )
         else:
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-            r = requests.post(url, json={"chat_id": CHAT_ID, "text": testo, "parse_mode": "HTML"}, timeout=30)
+            r = requests.post(
+                url,
+                json={"chat_id": CHAT_ID, "text": testo, "parse_mode": "HTML"},
+                timeout=30
+            )
         if r.status_code == 200:
             print("✅ Telegram OK")
         else:
@@ -158,7 +205,7 @@ def posta_su_telegram(testo, video_path=None):
 
 # --- CORE DEL BOT ---
 def main():
-    # 1. Valida tutti i secrets prima di fare qualsiasi cosa
+    # 1. Valida secrets
     validate_secrets()
 
     # 2. Autenticazione
@@ -168,66 +215,95 @@ def main():
 
     # 3. Trova colonna "Pubblicato" dinamicamente
     headers = sheet.row_values(1)
+    print(f"📋 Colonne trovate nel foglio: {headers}")
+
     try:
         col_pub_idx = headers.index("Pubblicato") + 1
     except ValueError:
         print("❌ Colonna 'Pubblicato' non trovata nel foglio!")
+        print(f"   Colonne disponibili: {headers}")
         return
 
+    processati = 0
+    saltati = 0
+
     for i, post in enumerate(records, start=2):
+
+        # Salta righe già pubblicate
         if str(post.get("Pubblicato", "")).strip().upper() == "SI":
+            saltati += 1
             continue
 
-        titolo_riga = post.get('Titolo', f'Riga {i}')
-        print(f"\n🆕 Elaborazione riga {i}: {titolo_riga}")
+        # Legge i campi dalle colonne reali del foglio
+        nome_file   = str(post.get("Nome_File_Video", "")).strip()
+        descrizione = str(post.get("Descrizione", "")).strip()
+        data_post   = str(post.get("Data", datetime.now().strftime("%Y-%m-%d"))).strip()
+        tipologia   = str(post.get("Tipologia", "Immobile")).strip()
 
-        video_id_drive = post.get("ID_Video_Drive", "").strip()
-        if not video_id_drive:
-            print(f"⚠️ Nessun ID_Video_Drive per riga {i}, salto.")
+        # Salta righe senza video associato
+        if not nome_file:
+            print(f"⚠️ Riga {i}: colonna Nome_File_Video vuota, salto.")
             continue
 
-        desc_base = post.get("Descrizione", "")
-        data_sheet = post.get("Data", datetime.now().strftime("%d/%m/%Y"))
-        titolo_video = f"Casa a Favara - {data_sheet}"
-        video_local = f"temp_video_{i}.mp4"
+        print(f"\n🆕 Elaborazione riga {i}: {nome_file} ({tipologia} - {data_post})")
 
-        # 4. Download da Drive
+        # Titolo da usare su YouTube e WordPress
+        titolo_video = f"Immobiliare Giancani - {tipologia} - {data_post}"
+
+        # 4. Cerca il file su Google Drive per nome
+        drive_file_id = cerca_id_drive_per_nome(drive_service, nome_file)
+        if not drive_file_id:
+            print(f"⏭️ Riga {i} saltata: '{nome_file}' non trovato su Drive.")
+            continue
+
+        # 5. Scarica il video da Drive
+        video_locale = f"temp_video_{i}.mp4"
         try:
-            request = drive_service.files().get_media(fileId=video_id_drive)
-            with open(video_local, "wb") as f:
+            request = drive_service.files().get_media(fileId=drive_file_id)
+            with open(video_locale, "wb") as f:
                 f.write(request.execute())
-            print(f"✅ Video scaricato: {video_local}")
+            print(f"✅ Video scaricato: {video_locale}")
         except Exception as e:
             print(f"❌ Errore download Drive (riga {i}): {e}")
+            if os.path.exists(video_locale):
+                os.remove(video_locale)
             continue
 
-        # 5. Pubblica su YouTube
-        yt_link = posta_su_youtube(youtube_service, video_local, titolo_video, desc_base)
+        # 6. Pubblica su YouTube
+        yt_link = posta_su_youtube(youtube_service, video_locale, titolo_video, descrizione)
         if not yt_link:
-            if os.path.exists(video_local):
-                os.remove(video_local)
+            if os.path.exists(video_locale):
+                os.remove(video_locale)
             continue
 
-        # 6. Pubblica su WordPress
-        wp_link = posta_su_wordpress_ere(f"Immobile del {data_sheet}", desc_base, yt_link)
+        # 7. Pubblica su WordPress
+        wp_link = posta_su_wordpress(titolo_video, descrizione, yt_link)
 
-        # 7. Pubblica su Telegram
-        testo_social = f"🏠 <b>Nuova Proposta {data_sheet}</b>\n\n{desc_base}\n\n📺 YouTube: {yt_link}"
+        # 8. Componi messaggio e pubblica su Telegram
+        desc_troncata = descrizione[:500] + "..." if len(descrizione) > 500 else descrizione
+        testo_social = (
+            f"🏠 <b>{tipologia} - {data_post}</b>\n\n"
+            f"{desc_troncata}\n\n"
+            f"📺 <a href='{yt_link}'>Guarda su YouTube</a>"
+        )
         if wp_link:
-            testo_social += f"\n🌐 Sito: {wp_link}"
-        posta_su_telegram(testo_social, video_local)
+            testo_social += f"\n🌐 <a href='{wp_link}'>Vedi sul sito</a>"
 
-        # 8. Segna come pubblicato nel foglio
+        posta_su_telegram(testo_social, video_locale)
+
+        # 9. Segna come pubblicato nel foglio
         sheet.update_cell(i, col_pub_idx, "SI")
         print(f"✅ Riga {i} completata e segnata come SI.")
+        processati += 1
 
-        # 9. Pulizia file temporaneo
-        if os.path.exists(video_local):
-            os.remove(video_local)
+        # 10. Pulizia file temporaneo
+        if os.path.exists(video_locale):
+            os.remove(video_locale)
 
+        # Pausa anti-rate-limit
         time.sleep(5)
 
-    print("\n🏁 Bot completato.")
+    print(f"\n🏁 Bot completato. Processati: {processati} | Già pubblicati saltati: {saltati}")
 
 
 if __name__ == "__main__":
