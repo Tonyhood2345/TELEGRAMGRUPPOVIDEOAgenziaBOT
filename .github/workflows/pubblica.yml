@@ -1,9 +1,9 @@
 name: Bot Pubblicazione Immobiliare
 
 on:
-  workflow_dispatch: # Permette di avviare il bot manualmente con un pulsante su GitHub
+  workflow_dispatch: # Questo ti permette di avviarlo a mano con un pulsante su GitHub
   schedule:
-    - cron: '0 8,13,18 * * *' # Si avvia in automatico alle 8:00, 13:00 e 18:00 (orario UTC)
+    - cron: '0 8 * * *' # Si avvia in automatico SOLO UNA VOLTA AL GIORNO alle 8:00 UTC
 
 jobs:
   esegui-bot:
