@@ -18,8 +18,6 @@ GOOGLE_SECRETS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
 YT2_CLIENT_ID = os.environ.get("YT2_CLIENT_ID")
 YT2_CLIENT_SECRET = os.environ.get("YT2_CLIENT_SECRET")
 YT2_REFRESH_TOKEN = os.environ.get("YT2_REFRESH_TOKEN")
-
-# Segreti Facebook
 FB_PAGE_TOKEN = os.environ.get("FB_PAGE_TOKEN")
 FB_PAGE_ID = os.environ.get("FB_PAGE_ID")
 
@@ -178,7 +176,7 @@ def posta_su_facebook(testo, video_path):
         }
         with open(video_path, 'rb') as f:
             files = {'source': f}
-            r = requests.post(url, data=payload, files=files, timeout=300) # Timeout lungo per i video
+            r = requests.post(url, data=payload, files=files, timeout=300)
             
         if r.status_code == 200:
             video_id = r.json().get('id')
