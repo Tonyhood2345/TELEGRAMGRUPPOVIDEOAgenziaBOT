@@ -1,9 +1,9 @@
 name: Bot Pubblicazione Immobiliare
 
 on:
-  workflow_dispatch: # Questo ti permette di avviarlo a mano con un pulsante su GitHub
+  workflow_dispatch:
   schedule:
-    - cron: '0 8 * * *' # Si avvia in automatico SOLO UNA VOLTA AL GIORNO alle 8:00 UTC
+    - cron: '40 10 * * *' # 10:40 UTC corrisponde alle 11:40 in Italia
 
 jobs:
   esegui-bot:
@@ -32,4 +32,6 @@ jobs:
           YT2_CLIENT_ID: ${{ secrets.YT2_CLIENT_ID }}
           YT2_CLIENT_SECRET: ${{ secrets.YT2_CLIENT_SECRET }}
           YT2_REFRESH_TOKEN: ${{ secrets.YT2_REFRESH_TOKEN }}
+          FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
         run: python bot.py
