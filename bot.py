@@ -19,6 +19,10 @@ YT2_CLIENT_ID = os.environ.get("YT2_CLIENT_ID")
 YT2_CLIENT_SECRET = os.environ.get("YT2_CLIENT_SECRET")
 YT2_REFRESH_TOKEN = os.environ.get("YT2_REFRESH_TOKEN")
 
+# Segreti Facebook
+FB_PAGE_TOKEN = os.environ.get("FB_PAGE_TOKEN")
+FB_PAGE_ID = os.environ.get("FB_PAGE_ID")
+
 WP_USER = "Antonio Giancani"
 WP_API_URL = "https://www.immobiliaregiancani.it/wp-json/wp/v2/property"
 SHEET_ID = "19m1cStsqyCvzz3-AYFJKPnrLPNaDuCXEKM8Fka76-Hc"
@@ -46,7 +50,7 @@ def validate_secrets():
             f"❌ GOOGLE_APPLICATION_CREDENTIALS non è un JSON valido: {e}\n"
             "Assicurati di incollare il contenuto completo del file .json."
         )
-    print("✅ Tutti i secrets sono presenti e validi.")
+    print("✅ Tutti i secrets essenziali sono presenti e validi.")
 
 
 # --- AUTENTICAZIONE GOOGLE ---
@@ -160,6 +164,35 @@ def posta_su_wordpress(titolo, testo, yt_url):
         return None
 
 
+# --- PUBBLICAZIONE FACEBOOK ---
+def posta_su_facebook(testo, video_path):
+    if not FB_PAGE_TOKEN or not FB_PAGE_ID:
+        print("⚠️ FB_PAGE_TOKEN o FB_PAGE_ID non impostati, salto Facebook.")
+        return None
+    try:
+        print("🟦 Caricamento su Facebook in corso...")
+        url = f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}/videos"
+        payload = {
+            'access_token': FB_PAGE_TOKEN,
+            'description': testo
+        }
+        with open(video_path, 'rb') as f:
+            files = {'source': f}
+            r = requests.post(url, data=payload, files=files, timeout=300) # Timeout lungo per i video
+            
+        if r.status_code == 200:
+            video_id = r.json().get('id')
+            link = f"https://www.facebook.com/{FB_PAGE_ID}/videos/{video_id}"
+            print(f"✅ Facebook OK: {link}")
+            return link
+        else:
+            print(f"⚠️ Errore API Facebook: {r.status_code} - {r.text}")
+            return None
+    except Exception as e:
+        print(f"❌ Errore Facebook: {e}")
+        return None
+
+
 # --- PUBBLICAZIONE TELEGRAM ---
 def posta_su_telegram(testo, video_path=None):
     if not TELEGRAM_TOKEN or not CHAT_ID:
@@ -229,7 +262,6 @@ def main():
 
         # Salta righe senza video associato
         if not nome_file:
-            print(f"⚠️ Riga {i}: colonna Nome_File_Video vuota, salto.")
             continue
 
         print(f"\n🆕 Elaborazione riga {i}: {nome_file} ({tipologia} - {data_post})")
@@ -259,16 +291,19 @@ def main():
         # 6. Pubblica su YouTube
         yt_link = posta_su_youtube(youtube_service, video_locale, titolo_video, descrizione)
         if not yt_link:
-            print("🛑 Errore critico nel caricamento su YouTube (probabile limite giornaliero).")
-            print("Fermo completamente il bot per oggi. Riproverà in automatico domani.")
+            print("🛑 Errore critico YouTube (probabile limite giornaliero raggiunto). Mi fermo qui.")
             if os.path.exists(video_locale):
                 os.remove(video_locale)
-            break # <--- QUESTO BREAK FERMA IL BOT IN CASO DI ERRORE YOUTUBE
+            break # FERMA IL BOT IN CASO DI ERRORE YOUTUBE
 
         # 7. Pubblica su WordPress
         wp_link = posta_su_wordpress(titolo_video, descrizione, yt_link)
 
-        # 8. Componi messaggio e pubblica su Telegram
+        # 8. Pubblica su Facebook (NUOVO)
+        testo_fb = f"{titolo_video}\n\n{descrizione}"
+        fb_link = posta_su_facebook(testo_fb, video_locale)
+
+        # 9. Componi messaggio e pubblica su Telegram
         desc_troncata = descrizione[:500] + "..." if len(descrizione) > 500 else descrizione
         testo_social = (
             f"🏠 <b>{tipologia} - {data_post}</b>\n\n"
@@ -277,15 +312,17 @@ def main():
         )
         if wp_link:
             testo_social += f"\n🌐 <a href='{wp_link}'>Vedi sul sito</a>"
+        if fb_link:
+            testo_social += f"\n🟦 <a href='{fb_link}'>Vedi su Facebook</a>"
 
         posta_su_telegram(testo_social, video_locale)
 
-        # 9. Segna come pubblicato nel foglio
+        # 10. Segna come pubblicato nel foglio
         sheet.update_cell(i, col_pub_idx, "SI")
         print(f"✅ Riga {i} completata e segnata come SI.")
         processati += 1
 
-        # 10. Pulizia file temporaneo
+        # 11. Pulizia file temporaneo
         if os.path.exists(video_locale):
             os.remove(video_locale)
 
