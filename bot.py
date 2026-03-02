@@ -208,6 +208,7 @@ def main():
         col_pub_idx = headers.index("Pubblicato") + 1
     except ValueError:
         print("❌ Colonna 'Pubblicato' non trovata nel foglio!")
+        print(f"   Colonne disponibili: {headers}")
         return
 
     processati = 0
@@ -220,6 +221,7 @@ def main():
             saltati += 1
             continue
 
+        # Legge i campi dalle colonne reali del foglio
         nome_file   = str(post.get("Nome_File_Video", "")).strip()
         descrizione = str(post.get("Descrizione", "")).strip()
         data_post   = str(post.get("Data", datetime.now().strftime("%Y-%m-%d"))).strip()
@@ -232,15 +234,16 @@ def main():
 
         print(f"\n🆕 Elaborazione riga {i}: {nome_file} ({tipologia} - {data_post})")
 
+        # Titolo da usare su YouTube e WordPress
         titolo_video = f"Immobiliare Giancani - {tipologia} - {data_post}"
 
-        # 4. Cerca file Drive
+        # 4. Cerca il file su Google Drive per nome
         drive_file_id = cerca_id_drive_per_nome(drive_service, nome_file)
         if not drive_file_id:
             print(f"⏭️ Riga {i} saltata: '{nome_file}' non trovato su Drive.")
             continue
 
-        # 5. Scarica video
+        # 5. Scarica il video da Drive
         video_locale = f"temp_video_{i}.mp4"
         try:
             request = drive_service.files().get_media(fileId=drive_file_id)
@@ -248,40 +251,49 @@ def main():
                 f.write(request.execute())
             print(f"✅ Video scaricato: {video_locale}")
         except Exception as e:
-            print(f"❌ Errore download Drive: {e}")
-            if os.path.exists(video_locale): os.remove(video_locale)
+            print(f"❌ Errore download Drive (riga {i}): {e}")
+            if os.path.exists(video_locale):
+                os.remove(video_locale)
             continue
 
-        # 6. YouTube
+        # 6. Pubblica su YouTube
         yt_link = posta_su_youtube(youtube_service, video_locale, titolo_video, descrizione)
         if not yt_link:
-            if os.path.exists(video_locale): os.remove(video_locale)
-            continue
+            print("🛑 Errore critico nel caricamento su YouTube (probabile limite giornaliero).")
+            print("Fermo completamente il bot per oggi. Riproverà in automatico domani.")
+            if os.path.exists(video_locale):
+                os.remove(video_locale)
+            break # <--- QUESTO BREAK FERMA IL BOT IN CASO DI ERRORE YOUTUBE
 
-        # 7. WordPress
+        # 7. Pubblica su WordPress
         wp_link = posta_su_wordpress(titolo_video, descrizione, yt_link)
 
-        # 8. Telegram
+        # 8. Componi messaggio e pubblica su Telegram
         desc_troncata = descrizione[:500] + "..." if len(descrizione) > 500 else descrizione
-        testo_social = f"🏠 <b>{tipologia} - {data_post}</b>\n\n{desc_troncata}\n\n📺 <a href='{yt_link}'>Guarda su YouTube</a>"
-        if wp_link: testo_social += f"\n🌐 <a href='{wp_link}'>Vedi sul sito</a>"
+        testo_social = (
+            f"🏠 <b>{tipologia} - {data_post}</b>\n\n"
+            f"{desc_troncata}\n\n"
+            f"📺 <a href='{yt_link}'>Guarda su YouTube</a>"
+        )
+        if wp_link:
+            testo_social += f"\n🌐 <a href='{wp_link}'>Vedi sul sito</a>"
 
         posta_su_telegram(testo_social, video_locale)
 
-        # 9. Segna come pubblicato
+        # 9. Segna come pubblicato nel foglio
         sheet.update_cell(i, col_pub_idx, "SI")
         print(f"✅ Riga {i} completata e segnata come SI.")
         processati += 1
 
-        # 10. Pulizia
+        # 10. Pulizia file temporaneo
         if os.path.exists(video_locale):
             os.remove(video_locale)
 
-        # 🛑 FERMA IL CICLO DOPO AVER PUBBLICATO 1 SOLO VIDEO 🛑
-        print("\n🛑 Pubblicazione di UN video completata con successo! Mi fermo qui per oggi.")
+        # 🛑 STOP: Ferma il ciclo dopo aver pubblicato 1 singolo video con successo
+        print("\n🛑 Pubblicazione di UN video completata! Il bot si ferma qui fino a domani.")
         break 
 
-    print(f"\n🏁 Bot completato. Processati con successo: {processati} | Già pubblicati saltati: {saltati}")
+    print(f"\n🏁 Bot completato. Processati oggi: {processati} | Già pubblicati saltati: {saltati}")
 
 
 if __name__ == "__main__":
