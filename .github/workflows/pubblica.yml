@@ -1,15 +1,16 @@
-name: Bot Immobiliare Multi-Social
+name: Bot Pubblicazione Immobiliare
 
 on:
+  workflow_dispatch: # Questo ti permette di avviarlo a mano con un pulsante su GitHub
   schedule:
-    - cron: '30 9 * * *'
-  workflow_dispatch:
+    - cron: '0 8,13,18 * * *' # Si avvia in automatico alle 8:00, 13:00 e 18:00 (orario UTC)
 
 jobs:
-  build:
+  esegui-bot:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout del codice
         uses: actions/checkout@v3
 
       - name: Setup Python
@@ -17,18 +18,18 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Dependencies
-        run: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib requests gspread
+      - name: Installa le librerie necessarie
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: Esegui Bot
+      - name: Esegui il bot Python
         env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-          FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
-          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          WP_PASSWORD: ${{ secrets.WP_PASSWORD }}
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
           YT2_CLIENT_ID: ${{ secrets.YT2_CLIENT_ID }}
           YT2_CLIENT_SECRET: ${{ secrets.YT2_CLIENT_SECRET }}
           YT2_REFRESH_TOKEN: ${{ secrets.YT2_REFRESH_TOKEN }}
-          WP_PASSWORD: ${{ secrets.WP_PASSWORD }}
         run: python bot.py
