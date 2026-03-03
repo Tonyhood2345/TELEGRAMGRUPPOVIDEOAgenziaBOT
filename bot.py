@@ -288,16 +288,15 @@ def main():
 
         # 6. Pubblica su YouTube
         yt_link = posta_su_youtube(youtube_service, video_locale, titolo_video, descrizione)
+        wp_link = None
+        
         if not yt_link:
-            print("🛑 Errore critico YouTube (probabile limite giornaliero raggiunto). Mi fermo qui.")
-            if os.path.exists(video_locale):
-                os.remove(video_locale)
-            break # FERMA IL BOT IN CASO DI ERRORE YOUTUBE
+            print("⚠️ Errore YouTube. Salto YouTube e Sito Web, ma procedo con Facebook e Telegram!")
+        else:
+            # 7. Pubblica su WordPress SOLO se YouTube ha funzionato
+            wp_link = posta_su_wordpress(titolo_video, descrizione, yt_link)
 
-        # 7. Pubblica su WordPress
-        wp_link = posta_su_wordpress(titolo_video, descrizione, yt_link)
-
-        # 8. Pubblica su Facebook (NUOVO)
+        # 8. Pubblica su Facebook
         testo_fb = f"{titolo_video}\n\n{descrizione}"
         fb_link = posta_su_facebook(testo_fb, video_locale)
 
@@ -305,9 +304,10 @@ def main():
         desc_troncata = descrizione[:500] + "..." if len(descrizione) > 500 else descrizione
         testo_social = (
             f"🏠 <b>{tipologia} - {data_post}</b>\n\n"
-            f"{desc_troncata}\n\n"
-            f"📺 <a href='{yt_link}'>Guarda su YouTube</a>"
+            f"{desc_troncata}\n"
         )
+        if yt_link:
+            testo_social += f"\n📺 <a href='{yt_link}'>Guarda su YouTube</a>"
         if wp_link:
             testo_social += f"\n🌐 <a href='{wp_link}'>Vedi sul sito</a>"
         if fb_link:
@@ -324,7 +324,7 @@ def main():
         if os.path.exists(video_locale):
             os.remove(video_locale)
 
-        # 🛑 STOP: Ferma il ciclo dopo aver pubblicato 1 singolo video con successo
+        # 🛑 STOP: Ferma il ciclo dopo aver pubblicato 1 singolo video
         print("\n🛑 Pubblicazione di UN video completata! Il bot si ferma qui fino a domani.")
         break 
 
