@@ -290,13 +290,14 @@ def main():
         yt_link = posta_su_youtube(youtube_service, video_locale, titolo_video, descrizione)
         wp_link = None
         
+        # NUOVA LOGICA: Se YouTube fallisce pubblica su FB e TG lo stesso, tralasciando il sito
         if not yt_link:
-            print("⚠️ Errore YouTube. Salto YouTube e Sito Web, ma procedo con Facebook e Telegram!")
+            print("⚠️ Errore YouTube. Salto YouTube e Sito Web, ma procedo con Facebook e Telegram senza i loro link!")
         else:
             # 7. Pubblica su WordPress SOLO se YouTube ha funzionato
             wp_link = posta_su_wordpress(titolo_video, descrizione, yt_link)
 
-        # 8. Pubblica su Facebook
+        # 8. Pubblica su Facebook (con o senza YouTube, lo fa in ogni caso!)
         testo_fb = f"{titolo_video}\n\n{descrizione}"
         fb_link = posta_su_facebook(testo_fb, video_locale)
 
@@ -306,6 +307,7 @@ def main():
             f"🏠 <b>{tipologia} - {data_post}</b>\n\n"
             f"{desc_troncata}\n"
         )
+        # Aggiunge i link solo se esistono
         if yt_link:
             testo_social += f"\n📺 <a href='{yt_link}'>Guarda su YouTube</a>"
         if wp_link:
@@ -315,7 +317,7 @@ def main():
 
         posta_su_telegram(testo_social, video_locale)
 
-        # 10. Segna come pubblicato nel foglio
+        # 10. Segna come pubblicato nel foglio (In ogni caso, anche se YT ha fallito!)
         sheet.update_cell(i, col_pub_idx, "SI")
         print(f"✅ Riga {i} completata e segnata come SI.")
         processati += 1
