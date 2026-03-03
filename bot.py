@@ -197,7 +197,16 @@ def posta_su_telegram(testo, video_path=None):
         print("⚠️ TELEGRAM_TOKEN o CHAT_ID non impostati, salto Telegram.")
         return
     try:
+        invia_video = False
         if video_path and os.path.exists(video_path):
+            # Calcola il peso del file in Megabyte
+            peso_mb = os.path.getsize(video_path) / (1024 * 1024)
+            if peso_mb < 49: # Limite Telegram 50MB
+                invia_video = True
+            else:
+                print(f"⚠️ Il video pesa {peso_mb:.1f} MB (limite Telegram 50 MB). Invierò solo il testo e i link.")
+        
+        if invia_video:
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
             with open(video_path, "rb") as f:
                 r = requests.post(
@@ -213,6 +222,7 @@ def posta_su_telegram(testo, video_path=None):
                 json={"chat_id": CHAT_ID, "text": testo, "parse_mode": "HTML"},
                 timeout=30
             )
+            
         if r.status_code == 200:
             print("✅ Telegram OK")
         else:
