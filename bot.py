@@ -4,6 +4,7 @@ import requests
 import gspread
 import base64
 import time
+import re
 from google.oauth2.service_account import Credentials
 from google.oauth2.credentials import Credentials as OauthCredentials
 from googleapiclient.discovery import build
@@ -20,7 +21,7 @@ YT2_CLIENT_SECRET   = os.environ.get("YT2_CLIENT_SECRET")
 YT2_REFRESH_TOKEN   = os.environ.get("YT2_REFRESH_TOKEN")
 FB_PAGE_TOKEN       = os.environ.get("FB_PAGE_TOKEN")
 FB_PAGE_ID          = os.environ.get("FB_PAGE_ID")
-ANTHROPIC_API_KEY   = os.environ.get("ANTHROPIC_API_KEY")   # ← aggiungi su GitHub Secrets
+ANTHROPIC_API_KEY   = os.environ.get("ANTHROPIC_API_KEY")
 
 WP_USER     = "Antonio Giancani"
 WP_API_URL  = "https://www.immobiliaregiancani.it/wp-json/wp/v2/property"
@@ -30,7 +31,32 @@ DRIVE_FOLDER_NAME      = "Video_Da_Ripubblicare"
 GIORNI_RIPUBBLICAZIONE = 30
 
 # Ordine ESATTO colonne sheet:
-# Tipo | Data | Ora | Tipologia | Descrizione | 👍 Like | 💬 Commenti | 🔁 Condivisioni | Engagement | Anteprima | Link | Nome_File_Video | Pubblicato
+# Tipo | Data | Ora | Tipologia | Descrizione | 👍 Like | 💬 Commenti | 🔁 Condivisioni
+# Engagement | Anteprima | Link | Nome_File_Video | Pubblicato | Data Pubblicazione
+
+
+# ---------------------------------------------------------------------------
+# PULIZIA TESTO AI — rimuove markdown e artefatti da descrizioni generate
+# ---------------------------------------------------------------------------
+def pulisci_testo(testo):
+    """
+    Rimuove artefatti tipici delle risposte AI:
+    - **testo** → testo
+    - ***  →  (separatori)
+    - # Titoli
+    - Righe come "Hook:", "Opzione 1:", "Post Facebook" ecc.
+    - Linee vuote multiple → una sola
+    """
+    # Rimuovi separatori markdown
+    testo = re.sub(r'\*{2,}', '', testo)
+    testo = re.sub(r'#{1,6}\s*', '', testo)
+    # Rimuovi etichette tipo "Hook:", "Opzione 1 (...):", "Post Facebook"
+    testo = re.sub(r'^(Hook|Opzione \d+.*?|Post Facebook|Testo|Caption)\s*[:\-–]?\s*', '', testo, flags=re.MULTILINE | re.IGNORECASE)
+    # Rimuovi righe che sono solo simboli o separatori
+    testo = re.sub(r'^\s*[\*\-_=]{3,}\s*$', '', testo, flags=re.MULTILINE)
+    # Comprimi righe vuote multiple in una sola
+    testo = re.sub(r'\n{3,}', '\n\n', testo)
+    return testo.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +99,71 @@ def get_google_services():
     drive   = build('drive', 'v3', credentials=creds_gspread)
     youtube = build('youtube', 'v3', credentials=creds_yt)
     return gc, drive, youtube
+
+
+# ---------------------------------------------------------------------------
+# AGGIUNGE COLONNA "Data Pubblicazione" SE NON ESISTE
+# ---------------------------------------------------------------------------
+def assicura_colonna_data_pubblicazione(sheet):
+    """
+    Controlla se la colonna 'Data Pubblicazione' esiste nello sheet.
+    Se non esiste, la aggiunge subito dopo 'Pubblicato'.
+    Restituisce l'indice (1-based) della colonna.
+    """
+    headers = sheet.row_values(1)
+    if "Data Pubblicazione" in headers:
+        idx = headers.index("Data Pubblicazione") + 1
+        print(f"✅ Colonna 'Data Pubblicazione' trovata → colonna {idx}")
+        return idx
+
+    # Non esiste: la aggiungiamo dopo "Pubblicato"
+    try:
+        pos_pub = headers.index("Pubblicato") + 1  # 1-based
+    except ValueError:
+        pos_pub = len(headers)  # in fondo se Pubblicato non c'è
+
+    nuova_col = pos_pub + 1  # subito dopo Pubblicato
+    sheet.insert_cols([["Data Pubblicazione"]], col=nuova_col)
+    # Scrivi l'intestazione nella cella corretta
+    sheet.update_cell(1, nuova_col, "Data Pubblicazione")
+    print(f"✅ Colonna 'Data Pubblicazione' creata → colonna {nuova_col}")
+    return nuova_col
+
+
+# ---------------------------------------------------------------------------
+# NORMALIZZA "Pubblicato" — converte "Si", "si", "sì" → "SI"
+# ---------------------------------------------------------------------------
+def normalizza_colonna_pubblicato(sheet):
+    """
+    Scorre tutta la colonna 'Pubblicato' e uniforma i valori a SI / NO / SKIP maiuscolo.
+    Evita che 'Si' o 'si' vengano ignorati dal bot.
+    """
+    headers = sheet.row_values(1)
+    if "Pubblicato" not in headers:
+        return
+    col_idx = headers.index("Pubblicato") + 1
+    valori  = sheet.col_values(col_idx)  # include intestazione
+
+    aggiornamenti = []
+    for row_num, val in enumerate(valori[1:], start=2):  # salta header
+        normalizzato = val.strip().upper()
+        if normalizzato in ("SI", "SÌ", "SÍ"):
+            normalizzato = "SI"
+        elif normalizzato in ("NO",):
+            normalizzato = "NO"
+        elif normalizzato in ("SKIP",):
+            normalizzato = "SKIP"
+        else:
+            continue  # lascia invariato se vuoto o altro
+
+        if normalizzato != val.strip():
+            aggiornamenti.append({'range': f'{chr(64+col_idx)}{row_num}', 'values': [[normalizzato]]})
+
+    if aggiornamenti:
+        sheet.spreadsheet.values_batch_update({'valueInputOption': 'RAW', 'data': aggiornamenti})
+        print(f"🔧 Normalizzati {len(aggiornamenti)} valori in colonna 'Pubblicato'.")
+    else:
+        print("✅ Colonna 'Pubblicato' già corretta.")
 
 
 # ---------------------------------------------------------------------------
@@ -140,27 +231,32 @@ def upload_video_su_drive(drive_service, local_path, nome_file, folder_id=None):
 # ---------------------------------------------------------------------------
 def riscrivi_descrizione_con_claude(descrizione_originale, tipologia="Immobile"):
     """
-    Usa Claude Haiku (modello più economico) per riscrivere la descrizione
-    in modo più coinvolgente per i social. Se manca la chiave o va in errore,
-    restituisce la descrizione originale senza bloccare il bot.
+    Usa Claude Haiku per riscrivere la descrizione in modo pulito e coinvolgente.
+    Applica anche pulisci_testo() sul risultato per eliminare markdown residui.
+    Se manca la chiave o va in errore, restituisce la descrizione originale pulita.
     """
+    # Pulisci sempre anche la descrizione originale prima di usarla
+    desc_pulita = pulisci_testo(descrizione_originale)
+
     if not ANTHROPIC_API_KEY:
         print("⚠️ ANTHROPIC_API_KEY mancante. Uso descrizione originale.")
-        return descrizione_originale
+        return desc_pulita
 
     try:
         print("🤖 Riscrittura descrizione con Claude AI...")
         prompt = (
             f"Sei un esperto di marketing immobiliare italiano.\n"
             f"Riscrivi questa descrizione di un {tipologia} per i social media italiani.\n\n"
-            f"Regole:\n"
+            f"Regole IMPORTANTI:\n"
+            f"- Scrivi testo normale, SENZA asterischi, SENZA markdown, SENZA **grassetto**\n"
+            f"- SENZA etichette come 'Hook:', 'Post Facebook', 'Opzione 1' ecc.\n"
             f"- Mantieni indirizzo, caratteristiche e contatti originali\n"
             f"- Aggiungi un hook iniziale accattivante\n"
             f"- Usa emoji pertinenti ma senza esagerare\n"
             f"- Chiudi con una call-to-action chiara\n"
             f"- Massimo 300 parole\n"
-            f"- Scrivi SOLO la descrizione, senza commenti aggiuntivi\n\n"
-            f"Descrizione originale:\n{descrizione_originale}"
+            f"- Scrivi SOLO il testo finale del post, nient'altro\n\n"
+            f"Descrizione originale:\n{desc_pulita}"
         )
         response = requests.post(
             "https://api.anthropic.com/v1/messages",
@@ -178,14 +274,15 @@ def riscrivi_descrizione_con_claude(descrizione_originale, tipologia="Immobile")
         )
         if response.status_code == 200:
             testo = response.json()["content"][0]["text"].strip()
+            testo = pulisci_testo(testo)   # pulizia finale di sicurezza
             print("✅ Descrizione riscritta con successo.")
             return testo
         else:
             print(f"⚠️ Claude API: {response.status_code}. Uso descrizione originale.")
-            return descrizione_originale
+            return desc_pulita
     except Exception as e:
         print(f"❌ Errore Claude AI: {e}. Uso descrizione originale.")
-        return descrizione_originale
+        return desc_pulita
 
 
 # ---------------------------------------------------------------------------
@@ -198,12 +295,13 @@ def sincronizza_video_da_facebook(sheet, drive_service):
     SE non ci sono video nuovi → stampa un messaggio e continua senza fare nulla.
     SE trova video nuovi → per ognuno:
         1. Scarica il video e lo carica su Google Drive
-        2. Riscrive la descrizione con Claude AI
-        3. Aggiunge UNA riga allo sheet con TUTTE le colonne nell'ordine corretto:
+        2. Riscrive la descrizione con Claude AI (testo pulito, senza markdown)
+        3. Aggiunge UNA riga allo sheet nell'ordine corretto:
            Tipo | Data | Ora | Tipologia | Descrizione | 👍 Like | 💬 Commenti |
-           🔁 Condivisioni | Engagement | Anteprima | Link | Nome_File_Video | Pubblicato
-        4. Data = data pubblicazione Facebook + 30 giorni (quando il bot lo ripubblicherà)
-        5. Pubblicato = NO  (pronto per essere pubblicato tra 30 giorni)
+           🔁 Condivisioni | Engagement | Anteprima | Link | Nome_File_Video |
+           Pubblicato | Data Pubblicazione
+        4. Data = data Facebook + 30 giorni (quando il bot lo ripubblicherà)
+        5. Pubblicato = NO | Data Pubblicazione = vuota (verrà riempita alla pubblicazione)
     """
     if not FB_PAGE_TOKEN or not FB_PAGE_ID:
         print("⚠️ Credenziali Facebook mancanti. Salto sincronizzazione.")
@@ -211,16 +309,14 @@ def sincronizza_video_da_facebook(sheet, drive_service):
 
     print("\n🔍 Sincronizzazione video da Facebook...")
 
-    # Carica link già presenti per evitare doppioni
     records = sheet.get_all_records()
     links_esistenti = set(str(r.get("Link", "")).strip() for r in records if str(r.get("Link", "")).strip())
     nomi_esistenti  = set(str(r.get("Nome_File_Video", "")).strip() for r in records if str(r.get("Nome_File_Video", "")).strip())
     print(f"   📋 Video già nello sheet: {len(nomi_esistenti)}")
 
-    folder_id    = get_or_create_drive_folder(drive_service, DRIVE_FOLDER_NAME)
+    folder_id     = get_or_create_drive_folder(drive_service, DRIVE_FOLDER_NAME)
     nuovi_aggiunti = 0
 
-    # Recupera video dalla pagina Facebook
     try:
         r = requests.get(
             f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}/videos",
@@ -245,29 +341,26 @@ def sincronizza_video_da_facebook(sheet, drive_service):
         return
 
     for video in videos:
-        fb_id       = str(video.get("id", "")).strip()
-        titolo_raw  = str(video.get("title", "")).strip()
-        descrizione = str(video.get("description", "")).strip() or titolo_raw
+        fb_id        = str(video.get("id", "")).strip()
+        titolo_raw   = str(video.get("title", "")).strip()
+        descrizione  = str(video.get("description", "")).strip() or titolo_raw
         created_time = str(video.get("created_time", "")).strip()
-        source_url  = str(video.get("source", "")).strip()
-        permalink   = str(video.get("permalink_url", "")).strip()
+        source_url   = str(video.get("source", "")).strip()
+        permalink    = str(video.get("permalink_url", "")).strip()
 
-        # Statistiche
         likes        = video.get("likes", {}).get("summary", {}).get("total_count", 0)
         commenti     = video.get("comments", {}).get("summary", {}).get("total_count", 0)
         condivisioni = video.get("shares", {}).get("count", 0) if video.get("shares") else 0
         engagement   = likes + commenti + condivisioni
 
-        # Thumbnail
-        thumbnails = video.get("thumbnails", {}).get("data", [])
-        anteprima  = thumbnails[0].get("uri", "") if thumbnails else ""
+        thumbnails   = video.get("thumbnails", {}).get("data", [])
+        anteprima    = f'=IMAGE("{thumbnails[0].get("uri", "")}")' if thumbnails else ""
 
-        link_video = permalink or f"https://www.facebook.com/{FB_PAGE_ID}/videos/{fb_id}"
+        link_video   = permalink or f"https://www.facebook.com/{FB_PAGE_ID}/videos/{fb_id}"
 
         if not fb_id:
             continue
 
-        # Controllo doppioni
         if link_video in links_esistenti or f"fb_video_{fb_id}.mp4" in nomi_esistenti:
             print(f"   ⏭️ Video {fb_id} già presente. Salto.")
             continue
@@ -275,7 +368,6 @@ def sincronizza_video_da_facebook(sheet, drive_service):
         nome_file = f"fb_video_{fb_id}.mp4"
         print(f"\n   🆕 Nuovo video: {fb_id} | {created_time}")
 
-        # Parsing data/ora
         try:
             dt_obj         = datetime.strptime(created_time, "%Y-%m-%dT%H:%M:%S+0000")
             data_originale = dt_obj.strftime("%Y-%m-%d")
@@ -284,13 +376,11 @@ def sincronizza_video_da_facebook(sheet, drive_service):
             data_originale = datetime.now().strftime("%Y-%m-%d")
             ora_originale  = datetime.now().strftime("%H:%M")
 
-        # Data ripubblicazione = originale + 30 giorni
         try:
             data_ripub = (datetime.strptime(data_originale, "%Y-%m-%d") + timedelta(days=GIORNI_RIPUBBLICAZIONE)).strftime("%Y-%m-%d")
         except Exception:
             data_ripub = (datetime.now() + timedelta(days=GIORNI_RIPUBBLICAZIONE)).strftime("%Y-%m-%d")
 
-        # Rileva tipologia
         tipologia = "Immobile"
         for kw, tip in {
             "villa": "Villa", "appartamento": "Appartamento", "terreno": "Terreno",
@@ -301,10 +391,8 @@ def sincronizza_video_da_facebook(sheet, drive_service):
                 tipologia = tip
                 break
 
-        # Riscrive descrizione con Claude AI
         descrizione_ai = riscrivi_descrizione_con_claude(descrizione, tipologia)
 
-        # Scarica video e carica su Drive
         video_su_drive = False
         if source_url:
             video_locale = f"temp_sync_{fb_id}.mp4"
@@ -330,34 +418,34 @@ def sincronizza_video_da_facebook(sheet, drive_service):
         else:
             print("   ⚠️ URL sorgente non disponibile (serve permesso video_url sul token FB).")
 
-        # Riga nello sheet — ordine ESATTO delle colonne:
-        # Tipo|Data|Ora|Tipologia|Descrizione|👍Like|💬Commenti|🔁Condivisioni|Engagement|Anteprima|Link|Nome_File_Video|Pubblicato
+        # Riga con tutte le colonne nell'ordine esatto + Data Pubblicazione vuota
         nuova_riga = [
             "Video",                              # Tipo
-            data_ripub,                           # Data (data ripubblicazione = originale +30gg)
+            data_ripub,                           # Data (ripubblicazione = originale +30gg)
             ora_originale,                        # Ora
             tipologia,                            # Tipologia
-            descrizione_ai,                       # Descrizione (riscritta con Claude AI)
+            descrizione_ai,                       # Descrizione (pulita, riscritta con AI)
             likes,                                # 👍 Like
             commenti,                             # 💬 Commenti
             condivisioni,                         # 🔁 Condivisioni
             engagement,                           # Engagement
-            anteprima,                            # Anteprima (URL thumbnail)
-            link_video,                           # Link (permalink Facebook originale)
+            anteprima,                            # Anteprima (formula =IMAGE(...))
+            link_video,                           # Link
             nome_file,                            # Nome_File_Video
-            "NO" if video_su_drive else "SKIP",   # Pubblicato: NO=pronto, SKIP=video mancante
+            "NO" if video_su_drive else "SKIP",   # Pubblicato
+            "",                                   # Data Pubblicazione (vuota, riempita dopo)
         ]
 
-        sheet.append_row(nuova_riga)
+        sheet.append_row(nuova_riga, value_input_option='USER_ENTERED')
         links_esistenti.add(link_video)
         nomi_esistenti.add(nome_file)
         nuovi_aggiunti += 1
 
         print(f"   ✅ Sheet aggiornato: '{nome_file}' → ripubblica il {data_ripub} | Drive: {'✅' if video_su_drive else '❌'}")
-        time.sleep(1)  # pausa cortesia API
+        time.sleep(1)
 
     if nuovi_aggiunti == 0:
-        print("   ℹ️ Nessun video nuovo trovato. Sheet già aggiornato, il bot prosegue normalmente.")
+        print("   ℹ️ Nessun video nuovo. Sheet già aggiornato, il bot prosegue normalmente.")
     else:
         print(f"\n✅ Sincronizzazione completata. Nuovi video aggiunti: {nuovi_aggiunti}")
 
@@ -396,7 +484,7 @@ def posta_su_wordpress(titolo, testo, yt_url):
         print("⚠️ WP_PASSWORD mancante. Salto WordPress.")
         return None
     try:
-        video_id = yt_url.split("v=")[-1] if "v=" in yt_url else yt_url.split("/")[-1]
+        video_id   = yt_url.split("v=")[-1] if "v=" in yt_url else yt_url.split("/")[-1]
         video_html = (
             f'\n\n<iframe width="560" height="315" '
             f'src="https://www.youtube.com/embed/{video_id}" '
@@ -438,7 +526,7 @@ def posta_su_facebook(testo, video_path):
             )
         if r.status_code == 200:
             vid_id = r.json().get('id')
-            link = f"https://www.facebook.com/{FB_PAGE_ID}/videos/{vid_id}"
+            link   = f"https://www.facebook.com/{FB_PAGE_ID}/videos/{vid_id}"
             print(f"✅ Facebook OK: {link}")
             return link
         print(f"⚠️ Facebook: {r.status_code} - {r.text}")
@@ -486,19 +574,26 @@ def main():
     gc, drive_service, youtube_service = get_google_services()
     sheet = gc.open_by_key(SHEET_ID).sheet1
 
-    # STEP 1 — Sincronizza nuovi video da Facebook verso Sheet + Drive
-    # Se non ci sono video nuovi → nessuna azione, il bot prosegue
+    # STEP 1 — Assicura che esista la colonna "Data Pubblicazione"
+    col_data_pub_idx = assicura_colonna_data_pubblicazione(sheet)
+
+    # STEP 2 — Normalizza colonna Pubblicato (Si → SI, sì → SI ecc.)
+    normalizza_colonna_pubblicato(sheet)
+
+    # STEP 3 — Sincronizza nuovi video da Facebook → Sheet + Drive
     sincronizza_video_da_facebook(sheet, drive_service)
 
-    # STEP 2 — Ricarica records (potrebbero esserci nuove righe aggiunte sopra)
+    # STEP 4 — Ricarica records aggiornati
     records = sheet.get_all_records()
     headers = sheet.row_values(1)
     print(f"\n📋 Colonne sheet: {headers}")
 
     try:
-        col_pub_idx = headers.index("Pubblicato") + 1
-    except ValueError:
-        print(f"❌ Colonna 'Pubblicato' non trovata! Disponibili: {headers}")
+        col_pub_idx     = headers.index("Pubblicato") + 1
+        col_data_pub_idx = headers.index("Data Pubblicazione") + 1
+    except ValueError as e:
+        print(f"❌ Colonna non trovata: {e}")
+        print(f"   Disponibili: {headers}")
         return
 
     processati = 0
@@ -508,7 +603,6 @@ def main():
     for i, post in enumerate(records, start=2):
         stato = str(post.get("Pubblicato", "")).strip().upper()
 
-        # Salta già pubblicati o senza video (SKIP)
         if stato in ("SI", "SKIP"):
             saltati += 1
             continue
@@ -533,13 +627,11 @@ def main():
         print(f"\n🆕 Elaborazione riga {i}: {nome_file} ({tipologia} - {data_post})")
         titolo_video = f"Immobiliare Giancani - {tipologia} - {data_post}"
 
-        # Cerca su Drive
         drive_file_id = cerca_id_drive_per_nome(drive_service, nome_file)
         if not drive_file_id:
             print(f"⏭️ '{nome_file}' non trovato su Drive. Salto riga {i}.")
             continue
 
-        # Scarica da Drive
         video_locale = f"temp_video_{i}.mp4"
         try:
             request = drive_service.files().get_media(fileId=drive_file_id)
@@ -552,7 +644,6 @@ def main():
                 os.remove(video_locale)
             continue
 
-        # Pubblica YouTube → WordPress → Facebook → Telegram
         yt_link = posta_su_youtube(youtube_service, video_locale, titolo_video, descrizione)
         wp_link = posta_su_wordpress(titolo_video, descrizione, yt_link) if yt_link else None
         if not yt_link:
@@ -567,9 +658,11 @@ def main():
         if fb_link: testo_tg += f"\n🟦 <a href='{fb_link}'>Vedi su Facebook</a>"
         posta_su_telegram(testo_tg, video_locale)
 
-        # Segna come pubblicato
+        # Segna Pubblicato = SI e salva data e ora esatta di pubblicazione
+        data_ora_pub = datetime.now().strftime("%Y-%m-%d %H:%M")
         sheet.update_cell(i, col_pub_idx, "SI")
-        print(f"✅ Riga {i} → Pubblicato = SI")
+        sheet.update_cell(i, col_data_pub_idx, data_ora_pub)
+        print(f"✅ Riga {i} → Pubblicato = SI | Data Pubblicazione = {data_ora_pub}")
         processati += 1
 
         if os.path.exists(video_locale):
