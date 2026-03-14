@@ -24,38 +24,43 @@ FB_PAGE_ID          = os.environ.get("FB_PAGE_ID")
 ANTHROPIC_API_KEY   = os.environ.get("ANTHROPIC_API_KEY")
 
 # --- CONFIGURAZIONE WAHA (WHATSAPP) ---
-WAHA_URL            = "http://100.121.235.36:3000"
-WAHA_API_KEY        = "immobiliare2024"
-WHATSAPP_CHANNEL_ID = "120363191994943047@newsletter"
+# Usiamo l'IP di Tailscale del tuo Raspberry
+WAHA_URL            = os.environ.get("WAHA_URL", "http://100.121.235.36:3000")
+WAHA_API_KEY        = os.environ.get("WAHA_API_KEY", "immobiliare2024")
+WHATSAPP_CHANNEL_ID = os.environ.get("WHATSAPP_CHANNEL_ID", "120363191994943047@newsletter")
 
 WP_USER     = "Antonio Giancani"
 WP_API_URL  = "https://www.immobiliaregiancani.it/wp-json/wp/v2/property"
 SHEET_ID    = "19m1cStsqyCvzz3-AYFJKPnrLPNaDuCXEKM8Fka76-Hc"
+
 DRIVE_FOLDER_NAME      = "Video_Da_Ripubblicare"
 GIORNI_RIPUBBLICAZIONE = 30
 
 # ---------------------------------------------------------------------------
 # NUOVA FUNZIONE: STRATEGIA WHATSAPP (Solo Testo + Tutti i Link)
 # ---------------------------------------------------------------------------
-def send_whatsapp_video_strategy(tipologia, descrizione, yt_link, fb_link, tg_link=None):
+def posta_su_whatsapp_strategico(tipologia, descrizione, yt_link, fb_link, wp_link=None):
     """
-    Invia un messaggio su WhatsApp con la descrizione e tutti i link ai social.
-    Essendo solo testo, evita l'errore 422 (Plus version) di WAHA.
+    Invia un messaggio di solo testo a WhatsApp. 
+    Protegge il bot da eventuali blocchi se WAHA è offline.
     """
     try:
+        print("🟢 Preparazione messaggio per WhatsApp...")
         url = f"{WAHA_URL}/api/sendText"
         headers = {"X-Api-Key": WAHA_API_KEY, "Content-Type": "application/json"}
         
-        testo_wa = f"🎬 *NUOVO VIDEO: {tipologia.upper()}*\n\n"
-        testo_wa += f"{descrizione[:400]}...\n\n" # Tronca se troppo lunga
+        # Pulizia descrizione per WhatsApp (massimo 300 caratteri nell'anteprima)
+        desc_wa = descrizione[:300] + "..." if len(descrizione) > 300 else descrizione
+        
+        testo_wa = f"🎬 *NUOVA VIDEO PROPOSTA: {tipologia.upper()}*\n\n"
+        testo_wa += f"{desc_wa}\n\n"
         testo_wa += "📺 *Guarda il video completo qui:* \n"
         
         if yt_link: testo_wa += f"🔹 YouTube: {yt_link}\n"
         if fb_link: testo_wa += f"🔹 Facebook: {fb_link}\n"
-        if tg_link: testo_wa += f"🔹 Telegram: https://t.me/immobiliaregiancani\n" # Link generico canale
+        if wp_link: testo_wa += f"🔹 Sito Web: {wp_link}\n"
         
-        testo_wa += "\n📍 Favara, Corso Vittorio Veneto 151\n"
-        testo_wa += "🏠 *Agenzia Giancani*"
+        testo_wa += "\n🏠 *Agenzia Giancani - Favara*"
 
         payload = {
             "session": "default",
@@ -63,18 +68,24 @@ def send_whatsapp_video_strategy(tipologia, descrizione, yt_link, fb_link, tg_li
             "text": testo_wa
         }
         
-        r = requests.post(url, headers=headers, json=payload, timeout=20)
+        # Timeout breve: se WAHA non risponde entro 15 secondi, il bot va avanti
+        r = requests.post(url, headers=headers, json=payload, timeout=15)
         if r.status_code in [200, 201]:
-            print("✅ WhatsApp Strategic OK")
+            print("✅ WhatsApp OK (Strategia Link)")
         else:
-            print(f"⚠️ WhatsApp Error: {r.text}")
+            print(f"⚠️ WhatsApp ha risposto con errore: {r.status_code}")
     except Exception as e:
-        print(f"⚠️ WhatsApp bypassato (offline o errore): {e}")
+        print(f"⚠️ WhatsApp bypassato per stabilità. Motivo: {e}")
 
-# ... [MANTENERE TUTTE LE ALTRE FUNZIONI: pulisci_testo, validate_secrets, get_google_services, ecc.] ...
+# ... [PULIZIA TESTO AI, VALIDAZIONE SECRETS, AUTENTICAZIONE GOOGLE, ECC. - COPIALI DALLA TUA VERSIONE PRECEDENTE] ...
+
+# [MANTENI QUI LE FUNZIONI: assicura_colonna_data_pubblicazione, normalizza_colonna_pubblicato, 
+# cerca_id_drive_per_nome, get_or_create_drive_folder, upload_video_su_drive, 
+# riscrivi_descrizione_con_claude, sincronizza_video_da_facebook, 
+# posta_su_youtube, posta_su_wordpress, posta_su_facebook, posta_su_telegram]
 
 # ---------------------------------------------------------------------------
-# MAIN (MODIFICATO PER INCLUDERE WHATSAPP)
+# MAIN (MODIFICATO)
 # ---------------------------------------------------------------------------
 def main():
     validate_secrets()
@@ -87,9 +98,9 @@ def main():
 
     records = sheet.get_all_records()
     headers = sheet.row_values(1)
-    
+
     try:
-        col_pub_idx = headers.index("Pubblicato") + 1
+        col_pub_idx      = headers.index("Pubblicato") + 1
         col_data_pub_idx = headers.index("Data Pubblicazione") + 1
     except ValueError as e:
         print(f"❌ Colonna non trovata: {e}")
@@ -108,16 +119,14 @@ def main():
 
         if not nome_file: continue
 
-        # Controllo data
         try:
             if datetime.strptime(data_post, "%Y-%m-%d").date() > oggi:
                 continue
         except ValueError: pass
 
-        print(f"\n🆕 Elaborazione video: {nome_file}")
+        print(f"\n🆕 Elaborazione: {nome_file}")
         titolo_video = f"Immobiliare Giancani - {tipologia} - {data_post}"
-        
-        # Gestione Video Drive
+
         drive_file_id = cerca_id_drive_per_nome(drive_service, nome_file)
         if not drive_file_id: continue
 
@@ -127,33 +136,22 @@ def main():
             with open(video_locale, "wb") as f:
                 f.write(request.execute())
         except Exception as e:
-            print(f"❌ Errore download: {e}")
+            print(f"❌ Download fallito: {e}")
             continue
 
-        # --- PUBBLICAZIONE MULTI-CANALE ---
-        
-        # 1. YouTube
+        # --- PUBBLICAZIONE ---
         yt_link = posta_su_youtube(youtube_service, video_locale, titolo_video, descrizione)
-        
-        # 2. WordPress
         wp_link = posta_su_wordpress(titolo_video, descrizione, yt_link) if yt_link else None
-        
-        # 3. Facebook
         fb_link = posta_su_facebook(f"{titolo_video}\n\n{descrizione}", video_locale)
+        
+        # Telegram
+        posta_su_telegram(f"🏠 {tipologia}\n\n{descrizione}\n\nFB: {fb_link}", video_locale)
 
-        # 4. Telegram
-        desc_troncata = descrizione[:500] + "..." if len(descrizione) > 500 else descrizione
-        testo_tg = f"🏠 <b>{tipologia} - {data_post}</b>\n\n{desc_troncata}\n"
-        if yt_link: testo_tg += f"\n📺 <a href='{yt_link}'>Guarda su YouTube</a>"
-        if wp_link: testo_tg += f"\n🌐 <a href='{wp_link}'>Vedi sul sito</a>"
-        if fb_link: testo_tg += f"\n🟦 <a href='{fb_link}'>Vedi su Facebook</a>"
-        posta_su_telegram(testo_tg, video_locale)
+        # --- WHATSAPP (CON STRATEGIA LINK) ---
+        # Questa parte è protetta: se WAHA fallisce, lo sheet viene aggiornato comunque
+        posta_su_whatsapp_strategico(tipologia, descrizione, yt_link, fb_link, wp_link)
 
-        # 5. STRATEGIA WHATSAPP (Solo Testo + Tutti i Link)
-        # Qui mandiamo il messaggio a WhatsApp con i link appena generati
-        send_whatsapp_video_strategy(tipologia, descrizione, yt_link, fb_link)
-
-        # Aggiornamento Sheet
+        # Segna Pubblicato
         data_ora_pub = datetime.now().strftime("%Y-%m-%d %H:%M")
         sheet.update_cell(i, col_pub_idx, "SI")
         sheet.update_cell(i, col_data_pub_idx, data_ora_pub)
@@ -161,7 +159,7 @@ def main():
         if os.path.exists(video_locale):
             os.remove(video_locale)
 
-        print("\n🛑 Un video pubblicato su tutti i canali. Fine per oggi.")
+        print(f"✅ Riga {i} completata su tutti i canali.")
         break
 
 if __name__ == "__main__":
