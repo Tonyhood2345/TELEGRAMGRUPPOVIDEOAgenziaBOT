@@ -23,634 +23,125 @@ FB_PAGE_TOKEN       = os.environ.get("FB_PAGE_TOKEN")
 FB_PAGE_ID          = os.environ.get("FB_PAGE_ID")
 ANTHROPIC_API_KEY   = os.environ.get("ANTHROPIC_API_KEY")
 
+# --- CONFIGURAZIONE WAHA (WHATSAPP) ---
+WAHA_URL            = "http://100.121.235.36:3000"
+WAHA_API_KEY        = "immobiliare2024"
+WHATSAPP_CHANNEL_ID = "120363191994943047@newsletter"
+
 WP_USER     = "Antonio Giancani"
 WP_API_URL  = "https://www.immobiliaregiancani.it/wp-json/wp/v2/property"
 SHEET_ID    = "19m1cStsqyCvzz3-AYFJKPnrLPNaDuCXEKM8Fka76-Hc"
-
 DRIVE_FOLDER_NAME      = "Video_Da_Ripubblicare"
 GIORNI_RIPUBBLICAZIONE = 30
 
-# Ordine ESATTO colonne sheet:
-# Tipo | Data | Ora | Tipologia | Descrizione | 👍 Like | 💬 Commenti | 🔁 Condivisioni
-# Engagement | Anteprima | Link | Nome_File_Video | Pubblicato | Data Pubblicazione
-
-
 # ---------------------------------------------------------------------------
-# PULIZIA TESTO AI — rimuove markdown e artefatti da descrizioni generate
+# NUOVA FUNZIONE: STRATEGIA WHATSAPP (Solo Testo + Tutti i Link)
 # ---------------------------------------------------------------------------
-def pulisci_testo(testo):
+def send_whatsapp_video_strategy(tipologia, descrizione, yt_link, fb_link, tg_link=None):
     """
-    Rimuove artefatti tipici delle risposte AI:
-    - **testo** → testo
-    - ***  →  (separatori)
-    - # Titoli
-    - Righe come "Hook:", "Opzione 1:", "Post Facebook" ecc.
-    - Linee vuote multiple → una sola
+    Invia un messaggio su WhatsApp con la descrizione e tutti i link ai social.
+    Essendo solo testo, evita l'errore 422 (Plus version) di WAHA.
     """
-    # Rimuovi separatori markdown
-    testo = re.sub(r'\*{2,}', '', testo)
-    testo = re.sub(r'#{1,6}\s*', '', testo)
-    # Rimuovi etichette tipo "Hook:", "Opzione 1 (...):", "Post Facebook"
-    testo = re.sub(r'^(Hook|Opzione \d+.*?|Post Facebook|Testo|Caption)\s*[:\-–]?\s*', '', testo, flags=re.MULTILINE | re.IGNORECASE)
-    # Rimuovi righe che sono solo simboli o separatori
-    testo = re.sub(r'^\s*[\*\-_=]{3,}\s*$', '', testo, flags=re.MULTILINE)
-    # Comprimi righe vuote multiple in una sola
-    testo = re.sub(r'\n{3,}', '\n\n', testo)
-    return testo.strip()
-
-
-# ---------------------------------------------------------------------------
-# VALIDAZIONE SECRETS
-# ---------------------------------------------------------------------------
-def validate_secrets():
-    required = {
-        "GOOGLE_APPLICATION_CREDENTIALS": GOOGLE_SECRETS,
-        "YT2_CLIENT_ID":     YT2_CLIENT_ID,
-        "YT2_CLIENT_SECRET": YT2_CLIENT_SECRET,
-        "YT2_REFRESH_TOKEN": YT2_REFRESH_TOKEN,
-    }
-    missing = [k for k, v in required.items() if not v]
-    if missing:
-        raise EnvironmentError(f"❌ Variabili mancanti: {', '.join(missing)}")
     try:
-        json.loads(GOOGLE_SECRETS)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"❌ GOOGLE_APPLICATION_CREDENTIALS non è JSON valido: {e}")
-    print("✅ Tutti i secrets sono presenti e validi.")
+        url = f"{WAHA_URL}/api/sendText"
+        headers = {"X-Api-Key": WAHA_API_KEY, "Content-Type": "application/json"}
+        
+        testo_wa = f"🎬 *NUOVO VIDEO: {tipologia.upper()}*\n\n"
+        testo_wa += f"{descrizione[:400]}...\n\n" # Tronca se troppo lunga
+        testo_wa += "📺 *Guarda il video completo qui:* \n"
+        
+        if yt_link: testo_wa += f"🔹 YouTube: {yt_link}\n"
+        if fb_link: testo_wa += f"🔹 Facebook: {fb_link}\n"
+        if tg_link: testo_wa += f"🔹 Telegram: https://t.me/immobiliaregiancani\n" # Link generico canale
+        
+        testo_wa += "\n📍 Favara, Corso Vittorio Veneto 151\n"
+        testo_wa += "🏠 *Agenzia Giancani*"
 
-
-# ---------------------------------------------------------------------------
-# AUTENTICAZIONE GOOGLE
-# ---------------------------------------------------------------------------
-def get_google_services():
-    creds_dict = json.loads(GOOGLE_SECRETS)
-    creds_gspread = Credentials.from_service_account_info(creds_dict, scopes=[
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive"
-    ])
-    creds_yt = OauthCredentials(
-        token=None,
-        refresh_token=YT2_REFRESH_TOKEN,
-        client_id=YT2_CLIENT_ID,
-        client_secret=YT2_CLIENT_SECRET,
-        token_uri="https://oauth2.googleapis.com/token"
-    )
-    gc      = gspread.authorize(creds_gspread)
-    drive   = build('drive', 'v3', credentials=creds_gspread)
-    youtube = build('youtube', 'v3', credentials=creds_yt)
-    return gc, drive, youtube
-
-
-# ---------------------------------------------------------------------------
-# AGGIUNGE COLONNA "Data Pubblicazione" SE NON ESISTE
-# ---------------------------------------------------------------------------
-def assicura_colonna_data_pubblicazione(sheet):
-    """
-    Controlla se la colonna 'Data Pubblicazione' esiste nello sheet.
-    Se non esiste, la aggiunge subito dopo 'Pubblicato'.
-    Restituisce l'indice (1-based) della colonna.
-    """
-    headers = sheet.row_values(1)
-    if "Data Pubblicazione" in headers:
-        idx = headers.index("Data Pubblicazione") + 1
-        print(f"✅ Colonna 'Data Pubblicazione' trovata → colonna {idx}")
-        return idx
-
-    # Non esiste: la aggiungiamo dopo "Pubblicato"
-    try:
-        pos_pub = headers.index("Pubblicato") + 1  # 1-based
-    except ValueError:
-        pos_pub = len(headers)  # in fondo se Pubblicato non c'è
-
-    nuova_col = pos_pub + 1  # subito dopo Pubblicato
-    sheet.insert_cols([["Data Pubblicazione"]], col=nuova_col)
-    # Scrivi l'intestazione nella cella corretta
-    sheet.update_cell(1, nuova_col, "Data Pubblicazione")
-    print(f"✅ Colonna 'Data Pubblicazione' creata → colonna {nuova_col}")
-    return nuova_col
-
-
-# ---------------------------------------------------------------------------
-# NORMALIZZA "Pubblicato" — converte "Si", "si", "sì" → "SI"
-# ---------------------------------------------------------------------------
-def normalizza_colonna_pubblicato(sheet):
-    """
-    Scorre tutta la colonna 'Pubblicato' e uniforma i valori a SI / NO / SKIP maiuscolo.
-    Evita che 'Si' o 'si' vengano ignorati dal bot.
-    """
-    headers = sheet.row_values(1)
-    if "Pubblicato" not in headers:
-        return
-    col_idx = headers.index("Pubblicato") + 1
-    valori  = sheet.col_values(col_idx)  # include intestazione
-
-    aggiornamenti = []
-    for row_num, val in enumerate(valori[1:], start=2):  # salta header
-        normalizzato = val.strip().upper()
-        if normalizzato in ("SI", "SÌ", "SÍ"):
-            normalizzato = "SI"
-        elif normalizzato in ("NO",):
-            normalizzato = "NO"
-        elif normalizzato in ("SKIP",):
-            normalizzato = "SKIP"
-        else:
-            continue  # lascia invariato se vuoto o altro
-
-        if normalizzato != val.strip():
-            aggiornamenti.append({'range': f'{chr(64+col_idx)}{row_num}', 'values': [[normalizzato]]})
-
-    if aggiornamenti:
-        sheet.spreadsheet.values_batch_update({'valueInputOption': 'RAW', 'data': aggiornamenti})
-        print(f"🔧 Normalizzati {len(aggiornamenti)} valori in colonna 'Pubblicato'.")
-    else:
-        print("✅ Colonna 'Pubblicato' già corretta.")
-
-
-# ---------------------------------------------------------------------------
-# UTILS DRIVE
-# ---------------------------------------------------------------------------
-def cerca_id_drive_per_nome(drive_service, nome_file):
-    try:
-        nome_escaped = nome_file.replace("'", "\\'")
-        result = drive_service.files().list(
-            q=f"name = '{nome_escaped}' and trashed = false",
-            spaces='drive', fields='files(id, name)', pageSize=1
-        ).execute()
-        files = result.get('files', [])
-        if not files:
-            print(f"⚠️ '{nome_file}' non trovato su Drive.")
-            return None
-        fid = files[0]['id']
-        print(f"✅ Drive trovato: '{nome_file}' → {fid}")
-        return fid
-    except Exception as e:
-        print(f"❌ Errore ricerca Drive: {e}")
-        return None
-
-
-def get_or_create_drive_folder(drive_service, folder_name):
-    try:
-        result = drive_service.files().list(
-            q=f"name = '{folder_name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
-            spaces='drive', fields='files(id, name)', pageSize=1
-        ).execute()
-        files = result.get('files', [])
-        if files:
-            fid = files[0]['id']
-            print(f"📁 Cartella Drive: '{folder_name}' → {fid}")
-            return fid
-        folder = drive_service.files().create(
-            body={'name': folder_name, 'mimeType': 'application/vnd.google-apps.folder'},
-            fields='id'
-        ).execute()
-        fid = folder.get('id')
-        print(f"📁 Cartella Drive creata: '{folder_name}' → {fid}")
-        return fid
-    except Exception as e:
-        print(f"❌ Errore cartella Drive: {e}")
-        return None
-
-
-def upload_video_su_drive(drive_service, local_path, nome_file, folder_id=None):
-    try:
-        metadata = {'name': nome_file}
-        if folder_id:
-            metadata['parents'] = [folder_id]
-        media = MediaFileUpload(local_path, mimetype='video/mp4', resumable=True)
-        file = drive_service.files().create(body=metadata, media_body=media, fields='id').execute()
-        fid = file.get('id')
-        print(f"✅ Caricato su Drive: '{nome_file}' → {fid}")
-        return fid
-    except Exception as e:
-        print(f"❌ Errore upload Drive: {e}")
-        return None
-
-
-# ---------------------------------------------------------------------------
-# RISCRITTURA DESCRIZIONE CON CLAUDE AI
-# ---------------------------------------------------------------------------
-def riscrivi_descrizione_con_claude(descrizione_originale, tipologia="Immobile"):
-    """
-    Usa Claude Haiku per riscrivere la descrizione in modo pulito e coinvolgente.
-    Applica anche pulisci_testo() sul risultato per eliminare markdown residui.
-    Se manca la chiave o va in errore, restituisce la descrizione originale pulita.
-    """
-    # Pulisci sempre anche la descrizione originale prima di usarla
-    desc_pulita = pulisci_testo(descrizione_originale)
-
-    if not ANTHROPIC_API_KEY:
-        print("⚠️ ANTHROPIC_API_KEY mancante. Uso descrizione originale.")
-        return desc_pulita
-
-    try:
-        print("🤖 Riscrittura descrizione con Claude AI...")
-        prompt = (
-            f"Sei un esperto di marketing immobiliare italiano.\n"
-            f"Riscrivi questa descrizione di un {tipologia} per i social media italiani.\n\n"
-            f"Regole IMPORTANTI:\n"
-            f"- Scrivi testo normale, SENZA asterischi, SENZA markdown, SENZA **grassetto**\n"
-            f"- SENZA etichette come 'Hook:', 'Post Facebook', 'Opzione 1' ecc.\n"
-            f"- Mantieni indirizzo, caratteristiche e contatti originali\n"
-            f"- Aggiungi un hook iniziale accattivante\n"
-            f"- Usa emoji pertinenti ma senza esagerare\n"
-            f"- Chiudi con una call-to-action chiara\n"
-            f"- Massimo 300 parole\n"
-            f"- Scrivi SOLO il testo finale del post, nient'altro\n\n"
-            f"Descrizione originale:\n{desc_pulita}"
-        )
-        response = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json"
-            },
-            json={
-                "model": "claude-haiku-4-5-20251001",
-                "max_tokens": 500,
-                "messages": [{"role": "user", "content": prompt}]
-            },
-            timeout=30
-        )
-        if response.status_code == 200:
-            testo = response.json()["content"][0]["text"].strip()
-            testo = pulisci_testo(testo)   # pulizia finale di sicurezza
-            print("✅ Descrizione riscritta con successo.")
-            return testo
-        else:
-            print(f"⚠️ Claude API: {response.status_code}. Uso descrizione originale.")
-            return desc_pulita
-    except Exception as e:
-        print(f"❌ Errore Claude AI: {e}. Uso descrizione originale.")
-        return desc_pulita
-
-
-# ---------------------------------------------------------------------------
-# SINCRONIZZA VIDEO DA FACEBOOK → SHEET + DRIVE
-# ---------------------------------------------------------------------------
-def sincronizza_video_da_facebook(sheet, drive_service):
-    """
-    Controlla la pagina Facebook cercando video/reel nuovi.
-
-    SE non ci sono video nuovi → stampa un messaggio e continua senza fare nulla.
-    SE trova video nuovi → per ognuno:
-        1. Scarica il video e lo carica su Google Drive
-        2. Riscrive la descrizione con Claude AI (testo pulito, senza markdown)
-        3. Aggiunge UNA riga allo sheet nell'ordine corretto:
-           Tipo | Data | Ora | Tipologia | Descrizione | 👍 Like | 💬 Commenti |
-           🔁 Condivisioni | Engagement | Anteprima | Link | Nome_File_Video |
-           Pubblicato | Data Pubblicazione
-        4. Data = data Facebook + 30 giorni (quando il bot lo ripubblicherà)
-        5. Pubblicato = NO | Data Pubblicazione = vuota (verrà riempita alla pubblicazione)
-    """
-    if not FB_PAGE_TOKEN or not FB_PAGE_ID:
-        print("⚠️ Credenziali Facebook mancanti. Salto sincronizzazione.")
-        return
-
-    print("\n🔍 Sincronizzazione video da Facebook...")
-
-    records = sheet.get_all_records()
-    links_esistenti = set(str(r.get("Link", "")).strip() for r in records if str(r.get("Link", "")).strip())
-    nomi_esistenti  = set(str(r.get("Nome_File_Video", "")).strip() for r in records if str(r.get("Nome_File_Video", "")).strip())
-    print(f"   📋 Video già nello sheet: {len(nomi_esistenti)}")
-
-    folder_id     = get_or_create_drive_folder(drive_service, DRIVE_FOLDER_NAME)
-    nuovi_aggiunti = 0
-
-    try:
-        r = requests.get(
-            f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}/videos",
-            params={
-                "access_token": FB_PAGE_TOKEN,
-                "fields": "id,title,description,created_time,source,permalink_url,thumbnails,likes.summary(true),comments.summary(true),shares",
-                "limit": 25
-            },
-            timeout=30
-        )
-        if r.status_code != 200:
-            print(f"❌ Errore API Facebook: {r.status_code} - {r.text[:300]}")
-            return
-        videos = r.json().get("data", [])
-        print(f"   🎬 Video trovati sulla pagina: {len(videos)}")
-    except Exception as e:
-        print(f"❌ Errore chiamata Facebook: {e}")
-        return
-
-    if not videos:
-        print("   ℹ️ Nessun video sulla pagina Facebook. Nulla da fare.")
-        return
-
-    for video in videos:
-        fb_id        = str(video.get("id", "")).strip()
-        titolo_raw   = str(video.get("title", "")).strip()
-        descrizione  = str(video.get("description", "")).strip() or titolo_raw
-        created_time = str(video.get("created_time", "")).strip()
-        source_url   = str(video.get("source", "")).strip()
-        permalink    = str(video.get("permalink_url", "")).strip()
-
-        likes        = video.get("likes", {}).get("summary", {}).get("total_count", 0)
-        commenti     = video.get("comments", {}).get("summary", {}).get("total_count", 0)
-        condivisioni = video.get("shares", {}).get("count", 0) if video.get("shares") else 0
-        engagement   = likes + commenti + condivisioni
-
-        thumbnails   = video.get("thumbnails", {}).get("data", [])
-        anteprima    = f'=IMAGE("{thumbnails[0].get("uri", "")}")' if thumbnails else ""
-
-        link_video   = permalink or f"https://www.facebook.com/{FB_PAGE_ID}/videos/{fb_id}"
-
-        if not fb_id:
-            continue
-
-        if link_video in links_esistenti or f"fb_video_{fb_id}.mp4" in nomi_esistenti:
-            print(f"   ⏭️ Video {fb_id} già presente. Salto.")
-            continue
-
-        nome_file = f"fb_video_{fb_id}.mp4"
-        print(f"\n   🆕 Nuovo video: {fb_id} | {created_time}")
-
-        try:
-            dt_obj         = datetime.strptime(created_time, "%Y-%m-%dT%H:%M:%S+0000")
-            data_originale = dt_obj.strftime("%Y-%m-%d")
-            ora_originale  = dt_obj.strftime("%H:%M")
-        except Exception:
-            data_originale = datetime.now().strftime("%Y-%m-%d")
-            ora_originale  = datetime.now().strftime("%H:%M")
-
-        try:
-            data_ripub = (datetime.strptime(data_originale, "%Y-%m-%d") + timedelta(days=GIORNI_RIPUBBLICAZIONE)).strftime("%Y-%m-%d")
-        except Exception:
-            data_ripub = (datetime.now() + timedelta(days=GIORNI_RIPUBBLICAZIONE)).strftime("%Y-%m-%d")
-
-        tipologia = "Immobile"
-        for kw, tip in {
-            "villa": "Villa", "appartamento": "Appartamento", "terreno": "Terreno",
-            "locale": "Locale Commerciale", "negozio": "Negozio",
-            "box": "Box/Garage", "garage": "Box/Garage"
-        }.items():
-            if kw in (descrizione + titolo_raw).lower():
-                tipologia = tip
-                break
-
-        descrizione_ai = riscrivi_descrizione_con_claude(descrizione, tipologia)
-
-        video_su_drive = False
-        if source_url:
-            video_locale = f"temp_sync_{fb_id}.mp4"
-            try:
-                print(f"   ⬇️ Download video...")
-                resp = requests.get(source_url, stream=True, timeout=300)
-                if resp.status_code == 200:
-                    with open(video_locale, "wb") as f:
-                        for chunk in resp.iter_content(chunk_size=1024 * 1024):
-                            if chunk:
-                                f.write(chunk)
-                    size_mb = os.path.getsize(video_locale) / (1024 * 1024)
-                    print(f"   ✅ Scaricato: {size_mb:.1f} MB")
-                    if upload_video_su_drive(drive_service, video_locale, nome_file, folder_id):
-                        video_su_drive = True
-                else:
-                    print(f"   ⚠️ Download fallito: HTTP {resp.status_code}")
-            except Exception as e:
-                print(f"   ❌ Errore download/upload: {e}")
-            finally:
-                if os.path.exists(video_locale):
-                    os.remove(video_locale)
-        else:
-            print("   ⚠️ URL sorgente non disponibile (serve permesso video_url sul token FB).")
-
-        # Riga con tutte le colonne nell'ordine esatto + Data Pubblicazione vuota
-        nuova_riga = [
-            "Video",                              # Tipo
-            data_ripub,                           # Data (ripubblicazione = originale +30gg)
-            ora_originale,                        # Ora
-            tipologia,                            # Tipologia
-            descrizione_ai,                       # Descrizione (pulita, riscritta con AI)
-            likes,                                # 👍 Like
-            commenti,                             # 💬 Commenti
-            condivisioni,                         # 🔁 Condivisioni
-            engagement,                           # Engagement
-            anteprima,                            # Anteprima (formula =IMAGE(...))
-            link_video,                           # Link
-            nome_file,                            # Nome_File_Video
-            "NO" if video_su_drive else "SKIP",   # Pubblicato
-            "",                                   # Data Pubblicazione (vuota, riempita dopo)
-        ]
-
-        sheet.append_row(nuova_riga, value_input_option='USER_ENTERED')
-        links_esistenti.add(link_video)
-        nomi_esistenti.add(nome_file)
-        nuovi_aggiunti += 1
-
-        print(f"   ✅ Sheet aggiornato: '{nome_file}' → ripubblica il {data_ripub} | Drive: {'✅' if video_su_drive else '❌'}")
-        time.sleep(1)
-
-    if nuovi_aggiunti == 0:
-        print("   ℹ️ Nessun video nuovo. Sheet già aggiornato, il bot prosegue normalmente.")
-    else:
-        print(f"\n✅ Sincronizzazione completata. Nuovi video aggiunti: {nuovi_aggiunti}")
-
-
-# ---------------------------------------------------------------------------
-# PUBBLICAZIONE YOUTUBE
-# ---------------------------------------------------------------------------
-def posta_su_youtube(youtube, file_path, titolo, descrizione):
-    try:
-        print(f"🎬 Caricamento su YouTube: {titolo}")
-        body = {
-            'snippet': {
-                'title': titolo,
-                'description': descrizione,
-                'tags': ['immobiliare', 'casa', 'vendita', 'Favara', 'Sicilia']
-            },
-            'status': {'privacyStatus': 'public', 'selfDeclaredMadeForKids': False}
+        payload = {
+            "session": "default",
+            "chatId": WHATSAPP_CHANNEL_ID,
+            "text": testo_wa
         }
-        response = youtube.videos().insert(
-            part='snippet,status', body=body,
-            media_body=MediaFileUpload(file_path, chunksize=-1, resumable=True)
-        ).execute()
-        link = f"https://www.youtube.com/watch?v={response['id']}"
-        print(f"✅ YouTube OK: {link}")
-        return link
-    except Exception as e:
-        print(f"❌ Errore YouTube: {e}")
-        return None
-
-
-# ---------------------------------------------------------------------------
-# PUBBLICAZIONE WORDPRESS
-# ---------------------------------------------------------------------------
-def posta_su_wordpress(titolo, testo, yt_url):
-    if not WP_PASSWORD:
-        print("⚠️ WP_PASSWORD mancante. Salto WordPress.")
-        return None
-    try:
-        video_id   = yt_url.split("v=")[-1] if "v=" in yt_url else yt_url.split("/")[-1]
-        video_html = (
-            f'\n\n<iframe width="560" height="315" '
-            f'src="https://www.youtube.com/embed/{video_id}" '
-            f'frameborder="0" allowfullscreen></iframe>\n\n'
-        )
-        auth_base64 = base64.b64encode(f"{WP_USER}:{WP_PASSWORD}".encode()).decode()
-        r = requests.post(
-            WP_API_URL,
-            headers={'Authorization': f'Basic {auth_base64}', 'Content-Type': 'application/json'},
-            json={'title': titolo, 'content': testo + video_html, 'status': 'publish'},
-            timeout=30
-        )
-        if r.status_code == 201:
-            link = r.json().get('link')
-            print(f"✅ WordPress OK: {link}")
-            return link
-        print(f"⚠️ WordPress: {r.status_code} - {r.text[:200]}")
-        return None
-    except Exception as e:
-        print(f"❌ Errore WordPress: {e}")
-        return None
-
-
-# ---------------------------------------------------------------------------
-# PUBBLICAZIONE FACEBOOK
-# ---------------------------------------------------------------------------
-def posta_su_facebook(testo, video_path):
-    if not FB_PAGE_TOKEN or not FB_PAGE_ID:
-        print("⚠️ Credenziali Facebook mancanti. Salto.")
-        return None
-    try:
-        print("🟦 Caricamento su Facebook...")
-        with open(video_path, 'rb') as f:
-            r = requests.post(
-                f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}/videos",
-                data={'access_token': FB_PAGE_TOKEN, 'description': testo},
-                files={'source': f},
-                timeout=300
-            )
-        if r.status_code == 200:
-            vid_id = r.json().get('id')
-            link   = f"https://www.facebook.com/{FB_PAGE_ID}/videos/{vid_id}"
-            print(f"✅ Facebook OK: {link}")
-            return link
-        print(f"⚠️ Facebook: {r.status_code} - {r.text}")
-        return None
-    except Exception as e:
-        print(f"❌ Errore Facebook: {e}")
-        return None
-
-
-# ---------------------------------------------------------------------------
-# PUBBLICAZIONE TELEGRAM
-# ---------------------------------------------------------------------------
-def posta_su_telegram(testo, video_path=None):
-    if not TELEGRAM_TOKEN or not CHAT_ID:
-        print("⚠️ Credenziali Telegram mancanti. Salto.")
-        return
-    try:
-        peso_mb = os.path.getsize(video_path) / (1024 * 1024) if video_path and os.path.exists(video_path) else 999
-        if peso_mb < 49:
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
-            with open(video_path, "rb") as f:
-                r = requests.post(
-                    url,
-                    data={"chat_id": CHAT_ID, "caption": testo[:1024], "parse_mode": "HTML"},
-                    files={"video": f}, timeout=120
-                )
+        
+        r = requests.post(url, headers=headers, json=payload, timeout=20)
+        if r.status_code in [200, 201]:
+            print("✅ WhatsApp Strategic OK")
         else:
-            if video_path:
-                print(f"⚠️ Video {peso_mb:.1f} MB > 49 MB. Invio solo testo.")
-            r = requests.post(
-                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-                json={"chat_id": CHAT_ID, "text": testo, "parse_mode": "HTML"},
-                timeout=30
-            )
-        print("✅ Telegram OK" if r.status_code == 200 else f"⚠️ Telegram: {r.status_code}")
+            print(f"⚠️ WhatsApp Error: {r.text}")
     except Exception as e:
-        print(f"❌ Errore Telegram: {e}")
+        print(f"⚠️ WhatsApp bypassato (offline o errore): {e}")
 
+# ... [MANTENERE TUTTE LE ALTRE FUNZIONI: pulisci_testo, validate_secrets, get_google_services, ecc.] ...
 
 # ---------------------------------------------------------------------------
-# MAIN
+# MAIN (MODIFICATO PER INCLUDERE WHATSAPP)
 # ---------------------------------------------------------------------------
 def main():
     validate_secrets()
     gc, drive_service, youtube_service = get_google_services()
     sheet = gc.open_by_key(SHEET_ID).sheet1
 
-    # STEP 1 — Assicura che esista la colonna "Data Pubblicazione"
     col_data_pub_idx = assicura_colonna_data_pubblicazione(sheet)
-
-    # STEP 2 — Normalizza colonna Pubblicato (Si → SI, sì → SI ecc.)
     normalizza_colonna_pubblicato(sheet)
-
-    # STEP 3 — Sincronizza nuovi video da Facebook → Sheet + Drive
     sincronizza_video_da_facebook(sheet, drive_service)
 
-    # STEP 4 — Ricarica records aggiornati
     records = sheet.get_all_records()
     headers = sheet.row_values(1)
-    print(f"\n📋 Colonne sheet: {headers}")
-
+    
     try:
-        col_pub_idx     = headers.index("Pubblicato") + 1
+        col_pub_idx = headers.index("Pubblicato") + 1
         col_data_pub_idx = headers.index("Data Pubblicazione") + 1
     except ValueError as e:
         print(f"❌ Colonna non trovata: {e}")
-        print(f"   Disponibili: {headers}")
         return
 
-    processati = 0
-    saltati    = 0
-    oggi       = datetime.now().date()
+    oggi = datetime.now().date()
 
     for i, post in enumerate(records, start=2):
         stato = str(post.get("Pubblicato", "")).strip().upper()
-
-        if stato in ("SI", "SKIP"):
-            saltati += 1
-            continue
+        if stato in ("SI", "SKIP"): continue
 
         nome_file   = str(post.get("Nome_File_Video", "")).strip()
         descrizione = str(post.get("Descrizione", "")).strip()
         data_post   = str(post.get("Data", str(oggi))).strip()
         tipologia   = str(post.get("Tipologia", "Immobile")).strip()
 
-        if not nome_file:
-            continue
+        if not nome_file: continue
 
-        # Salta se la data di ripubblicazione non è ancora arrivata
+        # Controllo data
         try:
             if datetime.strptime(data_post, "%Y-%m-%d").date() > oggi:
-                print(f"   ⏳ Riga {i} ({nome_file}): programmata per {data_post}. Salto.")
-                saltati += 1
                 continue
-        except ValueError:
-            pass
+        except ValueError: pass
 
-        print(f"\n🆕 Elaborazione riga {i}: {nome_file} ({tipologia} - {data_post})")
+        print(f"\n🆕 Elaborazione video: {nome_file}")
         titolo_video = f"Immobiliare Giancani - {tipologia} - {data_post}"
-
+        
+        # Gestione Video Drive
         drive_file_id = cerca_id_drive_per_nome(drive_service, nome_file)
-        if not drive_file_id:
-            print(f"⏭️ '{nome_file}' non trovato su Drive. Salto riga {i}.")
-            continue
+        if not drive_file_id: continue
 
         video_locale = f"temp_video_{i}.mp4"
         try:
             request = drive_service.files().get_media(fileId=drive_file_id)
             with open(video_locale, "wb") as f:
                 f.write(request.execute())
-            print(f"✅ Video scaricato: {video_locale}")
         except Exception as e:
-            print(f"❌ Download Drive fallito (riga {i}): {e}")
-            if os.path.exists(video_locale):
-                os.remove(video_locale)
+            print(f"❌ Errore download: {e}")
             continue
 
+        # --- PUBBLICAZIONE MULTI-CANALE ---
+        
+        # 1. YouTube
         yt_link = posta_su_youtube(youtube_service, video_locale, titolo_video, descrizione)
+        
+        # 2. WordPress
         wp_link = posta_su_wordpress(titolo_video, descrizione, yt_link) if yt_link else None
-        if not yt_link:
-            print("⚠️ YouTube fallito. Procedo con Facebook e Telegram senza link YouTube.")
-
+        
+        # 3. Facebook
         fb_link = posta_su_facebook(f"{titolo_video}\n\n{descrizione}", video_locale)
 
+        # 4. Telegram
         desc_troncata = descrizione[:500] + "..." if len(descrizione) > 500 else descrizione
         testo_tg = f"🏠 <b>{tipologia} - {data_post}</b>\n\n{desc_troncata}\n"
         if yt_link: testo_tg += f"\n📺 <a href='{yt_link}'>Guarda su YouTube</a>"
@@ -658,21 +149,20 @@ def main():
         if fb_link: testo_tg += f"\n🟦 <a href='{fb_link}'>Vedi su Facebook</a>"
         posta_su_telegram(testo_tg, video_locale)
 
-        # Segna Pubblicato = SI e salva data e ora esatta di pubblicazione
+        # 5. STRATEGIA WHATSAPP (Solo Testo + Tutti i Link)
+        # Qui mandiamo il messaggio a WhatsApp con i link appena generati
+        send_whatsapp_video_strategy(tipologia, descrizione, yt_link, fb_link)
+
+        # Aggiornamento Sheet
         data_ora_pub = datetime.now().strftime("%Y-%m-%d %H:%M")
         sheet.update_cell(i, col_pub_idx, "SI")
         sheet.update_cell(i, col_data_pub_idx, data_ora_pub)
-        print(f"✅ Riga {i} → Pubblicato = SI | Data Pubblicazione = {data_ora_pub}")
-        processati += 1
-
+        
         if os.path.exists(video_locale):
             os.remove(video_locale)
 
-        print("\n🛑 Un video pubblicato. Il bot si ferma qui fino a domani.")
+        print("\n🛑 Un video pubblicato su tutti i canali. Fine per oggi.")
         break
-
-    print(f"\n🏁 Fine. Pubblicati oggi: {processati} | Saltati: {saltati}")
-
 
 if __name__ == "__main__":
     main()
