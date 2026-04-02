@@ -5,6 +5,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import re
+from datetime import datetime
 
 # --- CONFIGURAZIONE SECRETS ---
 GOOGLE_SECRETS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
@@ -97,15 +98,22 @@ def main():
         sheet = gc.open_by_key(SHEET_ID).sheet1
         
         youtube = build('youtube', 'v3', developerKey=YT_API_KEY)
-        records = sheet.get_all_records()
-        headers = sheet.row_values(1)
         
-        # Mappatura Esatta Colonne (Zero-based index)
-        col = {nome: headers.index(nome) for nome in headers if nome in headers}
+        # --- FIX COLONNE VUOTE (Evita l'errore dei duplicati vuoti) ---
+        raw_data = sheet.get_all_values()
+        headers = raw_data[0]
         
-        # Verifica colonne minime vitali
+        records = []
+        for r_data in raw_data[1:]:
+            # Allunga le righe corte per farle combaciare con le intestazioni
+            riga_allungata = r_data + [""] * (len(headers) - len(r_data))
+            records.append(dict(zip(headers, riga_allungata)))
+            
+        # Mappa le colonne solo se hanno un nome (ignora le colonne vuote in fondo all'Excel)
+        col = {nome: headers.index(nome) for nome in headers if nome.strip() != ""}
+        
         if "Visualizzazioni" not in col or "Mi_Piace" not in col:
-            print("⚠️ Errore: Colonne statistiche non trovate. Controlla che le intestazioni siano perfette.")
+            print("⚠️ Errore: Colonne statistiche non trovate. Controlla le intestazioni.")
             return
 
         # --- FASE 1: AUTO-DISCOVERY (100 Post per cercare mesi indietro) ---
@@ -129,7 +137,7 @@ def main():
                     if "Data" in col: riga[col["Data"]] = data_post
                     if "Ora" in col: riga[col["Ora"]] = ora_post
                     if "Tipologia" in col: riga[col["Tipologia"]] = cat_post
-                    if "Descrizione" in col: riga[col["Descrizione"]] = testo_post  # TUTTO IL TESTO, senza tagli!
+                    if "Descrizione" in col: riga[col["Descrizione"]] = testo_post  # TUTTO IL TESTO!
                     if "Tipologia_Immobile" in col: riga[col["Tipologia_Immobile"]] = tipo_immobile
                     if "Data Pubblicazione" in col: riga[col["Data Pubblicazione"]] = data_post
                     if "Citta" in col: riga[col["Citta"]] = citta
@@ -176,7 +184,6 @@ def main():
         # 1.C YOUTUBE
         if YT_CHANNEL_ID:
             try:
-                # maxResults=50 è il massimo per chiamata API gratuita di ricerca YT, sufficiente per mesi arretrati
                 req_yt = youtube.search().list(part="snippet", channelId=YT_CHANNEL_ID, maxResults=50, order="date", type="video").execute()
                 for item in reversed(req_yt.get('items', [])):
                     vid_id = item['id']['videoId']
@@ -207,7 +214,13 @@ def main():
         if nuovi_inserimenti:
             sheet.append_rows(nuovi_inserimenti)
             print(f"📝 {len(nuovi_inserimenti)} nuovi inserimenti caricati perfettamente nel foglio!")
-            records = sheet.get_all_records()
+            
+            # Ricarichiamo con lo stesso metodo anti-crash
+            raw_data = sheet.get_all_values()
+            records = []
+            for r_data in raw_data[1:]:
+                riga_allungata = r_data + [""] * (len(headers) - len(r_data))
+                records.append(dict(zip(headers, riga_allungata)))
 
         # --- FASE 2: AGGIORNAMENTO STATISTICHE GLOBALI ---
         aggiornamenti = []
@@ -245,7 +258,6 @@ def main():
                             if 'comments' in r: tot_comments += int(r['comments']['summary']['total_count'])
                     except: pass 
             
-            # Formattazione per la batch_update (usando col)
             idx_v = col["Visualizzazioni"] + 1
             idx_l = col["Mi_Piace"] + 1
             idx_c = col["Commenti"] + 1
