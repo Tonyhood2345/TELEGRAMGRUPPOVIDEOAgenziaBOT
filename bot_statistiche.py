@@ -44,7 +44,7 @@ def main():
     headers = raw[0]
     col = {n: headers.index(n) for n in headers if n.strip()}
     
-   # 1. RECUPERO NUOVI LINK DA FACEBOOK (Versione Ultra-Sensibile)
+  # 1. RECUPERO NUOVI LINK DA FACEBOOK (Versione Ultra-Sensibile)
     print("🕵️ Scansione profonda dei post in corso...")
     records = [dict(zip(headers, r + [""]*(len(headers)-len(r)))) for r in raw[1:]]
     # Creiamo una lista pulita di ID per non sbagliare il confronto
