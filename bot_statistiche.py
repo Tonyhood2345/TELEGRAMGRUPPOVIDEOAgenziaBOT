@@ -103,21 +103,28 @@ def main():
             sheet.append_row(riga)
             print(f"✅ Riga aggiunta per {ticket}")
 
-    # 2. AGGIORNAMENTO STATISTICHE (Visite totali in colonna Visualizzazioni)
+    # 2. AGGIORNAMENTO STATISTICHE (Con Log per il Debug)
     print("📊 Aggiornamento statistiche in corso...")
     records = [dict(zip(headers, r + [""]*(len(headers)-len(r)))) for r in sheet.get_all_values()[1:]]
     aggiornamenti = []
     
     for i, r in enumerate(records, start=2):
         visite_tot = 0
+        link_fb = r.get("Link_Facebook", "")
         
         # Visite FB
-        fbid = re.search(r"(?:videos/|reel/)(\d+)", r.get("Link_Facebook", ""))
+        fbid = re.search(r"(?:videos/|reel/)(\d+)", link_fb)
         if fbid:
             try:
                 res = requests.get(f"https://graph.facebook.com/v18.0/{fbid.group(1)}?fields=views&access_token={FB_PAGE_TOKEN}").json()
-                visite_tot += int(res.get('views', 0))
-            except: pass
+                if 'views' in res:
+                    visite_fb = int(res['views'])
+                    visite_tot += visite_fb
+                    print(f"👀 Trovate {visite_fb} visite su FB per il link: {link_fb}")
+                else:
+                    print(f"⚠️ FB non ha restituito le visualizzazioni per {link_fb}. Risposta: {res}")
+            except Exception as e: 
+                print(f"❌ Errore lettura FB per {link_fb}: {e}")
 
         # Visite YT
         ytid = re.search(r"(?:v=|youtu\.be/)([^&]+)", r.get("Link_YouTube", ""))
@@ -125,15 +132,26 @@ def main():
             try:
                 res = youtube.videos().list(part="statistics", id=ytid.group(1)).execute()
                 if res.get('items'):
-                    visite_tot += int(res['items'][0]['statistics'].get('viewCount', 0))
-            except: pass
+                    visite_yt = int(res['items'][0]['statistics'].get('viewCount', 0))
+                    visite_tot += visite_yt
+                    print(f"📺 Trovate {visite_yt} visite su YT per il video ID {ytid.group(1)}")
+            except Exception as e:
+                print(f"❌ Errore lettura YT per {ytid.group(1)}: {e}")
 
-        # Scrive la somma in Visualizzazioni (Colonna T o dovunque si trovi)
+        # Scrive la somma in Visualizzazioni
         if "Visualizzazioni" in col: 
-            aggiornamenti.append({'range': gspread.utils.rowcol_to_a1(i, col["Visualizzazioni"]+1), 'values': [[visite_tot]]})
+            cella = gspread.utils.rowcol_to_a1(i, col["Visualizzazioni"]+1)
+            aggiornamenti.append({'range': cella, 'values': [[visite_tot]]})
+            print(f"✍️ Preparo la scrittura di {visite_tot} nella cella {cella}")
+        else:
+            print("⚠️ ERRORE CRITICO: La colonna 'Visualizzazioni' non esiste nel foglio Excel!")
 
     if aggiornamenti:
         sheet.batch_update(aggiornamenti)
+        print(f"✅ Aggiornate {len(aggiornamenti)} righe su Excel!")
+    else:
+        print("🤔 Nessun dato da aggiornare.")
+
     print("🎉 Bot finito! Statistiche aggiornate.")
 
 if __name__ == "__main__":
