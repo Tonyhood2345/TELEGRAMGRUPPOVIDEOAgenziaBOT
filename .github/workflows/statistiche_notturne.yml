@@ -1,7 +1,6 @@
 name: Bot Statistiche Notturno
 
 # Si attiva in automatico alle 03:00 di notte (ora italiana)
-# (0 2 * * * in cron equivale alle 2:00 UTC, che sono le 3:00/4:00 da noi)
 on:
   schedule:
     - cron: '0 2 * * *'
@@ -21,14 +20,22 @@ jobs:
       with:
         python-version: '3.11'
 
+    - name: Installa ffmpeg (Necessario per gestire i video)
+      run: sudo apt-get install -y ffmpeg
+
     - name: Installa le librerie
       run: |
         python -m pip install --upgrade pip
-        pip install requests gspread google-api-python-client google-auth
+        pip install requests gspread google-api-python-client google-auth google-auth-oauthlib google-auth-httplib2 yt-dlp
 
     - name: Esegui il Commercialista Notturno 🦉
       env:
         GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
         FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
-        YT_API_KEY: ${{ secrets.YT_API_KEY }}
+        FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+        YT2_CLIENT_ID: ${{ secrets.YT2_CLIENT_ID }}
+        YT2_CLIENT_SECRET: ${{ secrets.YT2_CLIENT_SECRET }}
+        YT2_REFRESH_TOKEN: ${{ secrets.YT2_REFRESH_TOKEN }}
+        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        CHAT_ID: ${{ secrets.CHAT_ID }}
       run: python bot_statistiche.py
