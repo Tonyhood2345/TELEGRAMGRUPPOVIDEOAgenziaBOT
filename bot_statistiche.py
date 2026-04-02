@@ -5,6 +5,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import re
+from datetime import datetime
 
 # --- CONFIGURAZIONE ---
 GOOGLE_SECRETS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
@@ -18,11 +19,66 @@ def extract_yt_id(url):
     return match.group(1) if match else None
 
 def extract_fb_id(url):
-    match = re.search(r"(?:videos/|reel/)(\d+)", str(url))
+    # Cattura gli ID dei video, dei reel e dei post generici
+    match = re.search(r"(?:videos/|reel/|posts/)(\d+)", str(url))
     return match.group(1) if match else None
 
+def analizza_testo_annuncio(testo):
+    """Analizza il testo del post per estrarre Tipologia e Città"""
+    if not testo:
+        return "Altro", "Non specificata"
+        
+    testo_min = testo.lower()
+    
+    # 1. PULIZIA: Rimuove la firma standard per non confondere la città dell'agenzia con quella dell'immobile
+    firme_da_ignorare = [
+        "corso vittorio veneto 15 favara",
+        "corso vittorio veneto 15",
+        "corso vittorio veneto",
+        "agenzia immobiliare giancani",
+        "immobiliare giancani",
+        "giancani"
+    ]
+    for firma in firme_da_ignorare:
+        testo_min = testo_min.replace(firma, "")
+
+    # 2. TROVA TIPOLOGIA
+    tipologie_chiave = {
+        "villa": "Villa",
+        "appartamento": "Appartamento",
+        "casa singola": "Casa Singola",
+        "terreno": "Terreno",
+        "magazzino": "Magazzino",
+        "attico": "Attico",
+        "b&b": "B&B",
+        "colonia": "Casa in Campagna"
+    }
+    
+    tipo_trovato = "Altro"
+    for chiave, valore in tipologie_chiave.items():
+        if chiave in testo_min:
+            tipo_trovato = valore
+            break 
+
+    # 3. TROVA CITTÀ 
+    citta_chiave = [
+        "favara", "agrigento", "licata", "aragona", 
+        "lampedusa", "linosa", "zingarello", "villaggio mosè", 
+        "palma di montechiaro", "priolo", "caldare"
+    ]
+    
+    citta_trovata = "Non specificata"
+    for citta in citta_chiave:
+        # Usa le espressioni regolari per trovare la parola intera e non confondersi
+        if re.search(r'\b' + re.escape(citta) + r'\b', testo_min):
+            # Formatta la prima lettera in maiuscolo (es. Favara)
+            citta_trovata = citta.title() 
+            break
+
+    return tipo_trovato, citta_trovata
+
 def main():
-    print("🦉 Avvio Bot Statistiche...")
+    print("🚀 Avvio Super Bot (Auto-Discovery + Statistiche)...")
     
     try:
         # Setup Google Sheets
@@ -31,12 +87,11 @@ def main():
         gc = gspread.authorize(creds_gs)
         sheet = gc.open_by_key(SHEET_ID).sheet1
         
-        # Setup YouTube
         youtube = build('youtube', 'v3', developerKey=YT_API_KEY)
-        
         records = sheet.get_all_records()
         headers = sheet.row_values(1)
         
+        # Mappatura Colonne Esatta basata sul tuo foglio
         try:
             idx_yt = headers.index("Link_YouTube") + 1
             idx_fb = headers.index("Link_Facebook") + 1
@@ -44,11 +99,62 @@ def main():
             idx_likes = headers.index("Mi_Piace") + 1
             idx_comments = headers.index("Commenti") + 1
         except ValueError:
-            print("⚠️ Errore: Colonne non trovate nel foglio Excel!")
+            print("⚠️ Errore: Colonne non trovate! Verifica le intestazioni nel foglio Excel.")
             return
 
+        # --- FASE 1: AUTO-DISCOVERY (Trova nuovi post su FB) ---
+        print("🕵️ Ricerca di nuovi annunci su Facebook...")
+        link_esistenti = [str(r.get("Link_Facebook", "")).strip() for r in records if r.get("Link_Facebook")]
+        nuovi_inserimenti = []
+        
+        try:
+            # Chiama l'API di Facebook per leggere gli ultimi 25 post della tua pagina
+            url_feed = f"https://graph.facebook.com/v18.0/me/published_posts?fields=id,message,permalink_url&limit=25&access_token={FB_PAGE_TOKEN}"
+            feed_req = requests.get(url_feed).json()
+            
+            if 'data' in feed_req:
+                # Leggiamo i post dal più vecchio al più nuovo così vengono inseriti in ordine
+                for post in reversed(feed_req['data']):
+                    fb_url = post.get('permalink_url', '')
+                    testo_post = post.get('message', '')
+                    
+                    if fb_url and fb_url not in link_esistenti:
+                        tipologia, citta = analizza_testo_annuncio(testo_post)
+                        
+                        # Creiamo una riga vuota con lo stesso numero di colonne del tuo file
+                        nuova_riga = [""] * len(headers)
+                        
+                        # Inserimento automatico dei dati nelle giuste colonne
+                        if "Data Pubblicazione" in headers:
+                            nuova_riga[headers.index("Data Pubblicazione")] = datetime.now().strftime("%Y-%m-%d")
+                        if "Link_Facebook" in headers:
+                            nuova_riga[headers.index("Link_Facebook")] = fb_url
+                        if "Descrizione" in headers:
+                            nuova_riga[headers.index("Descrizione")] = (testo_post[:150] + '...') if testo_post else ""
+                        if "Tipologia_Immobile" in headers:
+                            nuova_riga[headers.index("Tipologia_Immobile")] = tipologia
+                        if "Citta" in headers:
+                            nuova_riga[headers.index("Citta")] = citta
+                        if "Pubblicato" in headers:
+                            nuova_riga[headers.index("Pubblicato")] = "SI"
+                            
+                        nuovi_inserimenti.append(nuova_riga)
+                        link_esistenti.append(fb_url)
+                        print(f"🌟 Trovato nuovo annuncio! Tipo: {tipologia} | Città: {citta}")
+                        
+        except Exception as e:
+            print(f"⚠️ Errore durante la fase di Auto-Discovery FB: {e}")
+
+        # Scrive tutte le nuove righe trovate in un colpo solo
+        if nuovi_inserimenti:
+            sheet.append_rows(nuovi_inserimenti)
+            print(f"📝 Aggiunte {len(nuovi_inserimenti)} nuove righe in fondo al foglio!")
+            # Ricarichiamo il foglio per prendere in considerazione anche le righe appena create
+            records = sheet.get_all_records()
+
+        # --- FASE 2: AGGIORNAMENTO STATISTICHE ---
         aggiornamenti = []
-        print("🔄 Lettura statistiche in corso...")
+        print("🔄 Calcolo statistiche in corso...")
         
         for i, row in enumerate(records, start=2):
             yt_url = str(row.get("Link_YouTube", "")).strip()
@@ -59,7 +165,7 @@ def main():
                 
             tot_views, tot_likes, tot_comments = 0, 0, 0
             
-            # --- YOUTUBE ---
+            # LETTURA YOUTUBE
             if yt_url:
                 yt_id = extract_yt_id(yt_url)
                 if yt_id:
@@ -72,14 +178,13 @@ def main():
                             tot_likes += int(stats.get('likeCount', 0))
                             tot_comments += int(stats.get('commentCount', 0))
                     except Exception:
-                        pass # Ignora silenziomente errori YT
+                        pass 
 
-            # --- FACEBOOK ---
+            # LETTURA FACEBOOK
             if fb_url:
                 fb_id = extract_fb_id(fb_url)
                 if fb_id:
                     try:
-                        # RIMOSSO 'shares' DALLA RICHIESTA PER RISOLVERE L'ERRORE #100
                         url = f"https://graph.facebook.com/v18.0/{fb_id}?fields=views,likes.summary(true),comments.summary(true)&access_token={FB_PAGE_TOKEN}"
                         r = requests.get(url).json()
                         
@@ -90,19 +195,15 @@ def main():
                             if 'comments' in r:
                                 tot_comments += int(r['comments']['summary']['total_count'])
                     except Exception:
-                        pass # Ignora se non ha permessi o video non esiste
+                        pass 
                         
-            # Prepara l'aggiornamento
             aggiornamenti.append({'range': gspread.utils.rowcol_to_a1(i, idx_views), 'values': [[tot_views]]})
             aggiornamenti.append({'range': gspread.utils.rowcol_to_a1(i, idx_likes), 'values': [[tot_likes]]})
             aggiornamenti.append({'range': gspread.utils.rowcol_to_a1(i, idx_comments), 'values': [[tot_comments]]})
-            
-            print(f"✅ Riga {i}: {tot_views} V | {tot_likes} L | {tot_comments} C")
 
-        # Invia gli aggiornamenti al foglio
         if aggiornamenti:
             sheet.batch_update(aggiornamenti)
-            print("🎉 FOGLIO EXCEL AGGIORNATO CON SUCCESSO!")
+            print("🎉 TUTTO FATTO! EXCEL AGGIORNATO CON SUCCESSO.")
 
     except Exception as e:
         print(f"❌ Errore critico nel Bot: {e}")
