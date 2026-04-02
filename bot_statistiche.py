@@ -19,8 +19,8 @@ def extract_yt_id(url):
     return match.group(1) if match else None
 
 def extract_fb_id(url):
-    # Cattura gli ID dei video, dei reel e dei post generici
-    match = re.search(r"(?:videos/|reel/|posts/)(\d+)", str(url))
+    # ATTENZIONE: Cerca rigorosamente solo "videos/" o "reel/"
+    match = re.search(r"(?:videos/|reel/)(\d+)", str(url))
     return match.group(1) if match else None
 
 def analizza_testo_annuncio(testo):
@@ -30,7 +30,7 @@ def analizza_testo_annuncio(testo):
         
     testo_min = testo.lower()
     
-    # 1. PULIZIA: Rimuove la firma standard per non confondere la città dell'agenzia con quella dell'immobile
+    # 1. PULIZIA: Rimuove le firme per evitare falsi positivi sulla città
     firme_da_ignorare = [
         "corso vittorio veneto 15 favara",
         "corso vittorio veneto 15",
@@ -60,19 +60,28 @@ def analizza_testo_annuncio(testo):
             tipo_trovato = valore
             break 
 
-    # 3. TROVA CITTÀ 
-    citta_chiave = [
-        "favara", "agrigento", "licata", "aragona", 
-        "lampedusa", "linosa", "zingarello", "villaggio mosè", 
-        "palma di montechiaro", "priolo", "caldare"
-    ]
+    # 3. TROVA CITTÀ (Ignora la punteggiatura e mappa le contrade)
+    testo_pulito = re.sub(r'[^\w\s]', ' ', testo_min)
+    
+    mappa_citta = {
+        "favara": "Favara",
+        "priolo": "Favara",
+        "agrigento": "Agrigento",
+        "zingarello": "Agrigento",
+        "villaggio mosè": "Agrigento",
+        "licata": "Licata",
+        "aragona": "Aragona",
+        "caldare": "Aragona",
+        "lampedusa": "Lampedusa",
+        "linosa": "Linosa",
+        "palma di montechiaro": "Palma di Montechiaro"
+    }
     
     citta_trovata = "Non specificata"
-    for citta in citta_chiave:
-        # Usa le espressioni regolari per trovare la parola intera e non confondersi
-        if re.search(r'\b' + re.escape(citta) + r'\b', testo_min):
-            # Formatta la prima lettera in maiuscolo (es. Favara)
-            citta_trovata = citta.title() 
+    for chiave, citta_reale in mappa_citta.items():
+        # Cerca la parola esatta (es: trova "Favara" ma ignora "Favarotta")
+        if re.search(r'\b' + re.escape(chiave) + r'\b', testo_pulito):
+            citta_trovata = citta_reale
             break
 
     return tipo_trovato, citta_trovata
@@ -91,7 +100,7 @@ def main():
         records = sheet.get_all_records()
         headers = sheet.row_values(1)
         
-        # Mappatura Colonne Esatta basata sul tuo foglio
+        # Mappatura Colonne
         try:
             idx_yt = headers.index("Link_YouTube") + 1
             idx_fb = headers.index("Link_Facebook") + 1
@@ -102,29 +111,27 @@ def main():
             print("⚠️ Errore: Colonne non trovate! Verifica le intestazioni nel foglio Excel.")
             return
 
-        # --- FASE 1: AUTO-DISCOVERY (Trova nuovi post su FB) ---
-        print("🕵️ Ricerca di nuovi annunci su Facebook...")
+        # --- FASE 1: AUTO-DISCOVERY (Solo VIDEO e REEL) ---
+        print("🕵️ Ricerca di nuovi Video e Reel su Facebook...")
         link_esistenti = [str(r.get("Link_Facebook", "")).strip() for r in records if r.get("Link_Facebook")]
         nuovi_inserimenti = []
         
         try:
-            # Chiama l'API di Facebook per leggere gli ultimi 25 post della tua pagina
+            # Legge gli ultimi 25 post
             url_feed = f"https://graph.facebook.com/v18.0/me/published_posts?fields=id,message,permalink_url&limit=25&access_token={FB_PAGE_TOKEN}"
             feed_req = requests.get(url_feed).json()
             
             if 'data' in feed_req:
-                # Leggiamo i post dal più vecchio al più nuovo così vengono inseriti in ordine
                 for post in reversed(feed_req['data']):
                     fb_url = post.get('permalink_url', '')
                     testo_post = post.get('message', '')
                     
-                    if fb_url and fb_url not in link_esistenti:
+                    # FILTRO CRITICO: Aggiunge SOLO se l'URL contiene "videos" o "reel"
+                    if fb_url and ("/videos/" in fb_url or "/reel/" in fb_url) and fb_url not in link_esistenti:
                         tipologia, citta = analizza_testo_annuncio(testo_post)
                         
-                        # Creiamo una riga vuota con lo stesso numero di colonne del tuo file
                         nuova_riga = [""] * len(headers)
                         
-                        # Inserimento automatico dei dati nelle giuste colonne
                         if "Data Pubblicazione" in headers:
                             nuova_riga[headers.index("Data Pubblicazione")] = datetime.now().strftime("%Y-%m-%d")
                         if "Link_Facebook" in headers:
@@ -140,17 +147,16 @@ def main():
                             
                         nuovi_inserimenti.append(nuova_riga)
                         link_esistenti.append(fb_url)
-                        print(f"🌟 Trovato nuovo annuncio! Tipo: {tipologia} | Città: {citta}")
+                        print(f"🌟 Trovato nuovo VIDEO/REEL! Tipo: {tipologia} | Città: {citta}")
                         
         except Exception as e:
-            print(f"⚠️ Errore durante la fase di Auto-Discovery FB: {e}")
+            print(f"⚠️ Errore durante l'Auto-Discovery: {e}")
 
-        # Scrive tutte le nuove righe trovate in un colpo solo
+        # Se ha trovato nuovi video, li aggiunge in basso
         if nuovi_inserimenti:
             sheet.append_rows(nuovi_inserimenti)
-            print(f"📝 Aggiunte {len(nuovi_inserimenti)} nuove righe in fondo al foglio!")
-            # Ricarichiamo il foglio per prendere in considerazione anche le righe appena create
-            records = sheet.get_all_records()
+            print(f"📝 Aggiunti {len(nuovi_inserimenti)} nuovi video nel database!")
+            records = sheet.get_all_records() # Ricarica per calcolare le stats dei nuovi
 
         # --- FASE 2: AGGIORNAMENTO STATISTICHE ---
         aggiornamenti = []
