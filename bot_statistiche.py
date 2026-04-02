@@ -44,35 +44,46 @@ def main():
     headers = raw[0]
     col = {n: headers.index(n) for n in headers if n.strip()}
     
-    # 1. RECUPERO NUOVI LINK DA FACEBOOK (SENZA PUBBLICARE)
-    print("🕵️ Controllo nuovi post su Facebook...")
+   # 1. RECUPERO NUOVI LINK DA FACEBOOK (Versione Ultra-Sensibile)
+    print("🕵️ Scansione profonda dei post in corso...")
     records = [dict(zip(headers, r + [""]*(len(headers)-len(r)))) for r in raw[1:]]
-    link_esistenti = [str(r.get("Link_Facebook", "")) for r in records]
+    # Creiamo una lista pulita di ID per non sbagliare il confronto
+    id_esistenti = [re.search(r'(\d{10,})', str(r.get("Link_Facebook", ""))).group(1) 
+                   for r in records if re.search(r'(\d{10,})', str(r.get("Link_Facebook", "")))]
     
-    # Leggiamo gli ultimi 100 post (per coprire i mesi scorsi)
-    url_fb = f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}/published_posts?fields=message,created_time,permalink_url&limit=100&access_token={FB_PAGE_TOKEN}"
+    url_fb = f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}/published_posts?fields=message,created_time,permalink_url&limit=50&access_token={FB_PAGE_TOKEN}"
     fb_data = requests.get(url_fb).json().get('data', [])
     
     for p in reversed(fb_data):
         url = p.get('permalink_url', '')
-        if url and ("/videos/" in url or "/reel/" in url) and url not in link_esistenti:
-            msg = p.get('message', '')
-            tipo_i, citta, cat = analizza_testo_annuncio(msg)
-            ticket = estrai_ticket(msg)
-            
-            # Aggiungiamo la riga "vuota" (senza link YT che non abbiamo creato)
-            riga = [""] * len(headers)
-            if "Tipo" in col: riga[col["Tipo"]] = "POST"
-            if "Data" in col: riga[col["Data"]] = p.get('created_time').split('T')[0]
-            if "Descrizione" in col: riga[col["Descrizione"]] = msg
-            if "Tipologia_Immobile" in col: riga[col["Tipologia_Immobile"]] = tipo_i
-            if "Citta" in col: riga[col["Citta"]] = citta
-            if "Link_Facebook" in col: riga[col["Link_Facebook"]] = url
-            if "Ticket" in col: riga[col["Ticket"]] = ticket
-            
-            sheet.append_row(riga)
-            print(f"✅ Nuovo annuncio trovato e aggiunto: {ticket if ticket else 'Senza Ticket'}")
+        # Estraiamo l'ID numerico dal link che ci dà FB
+        match_id = re.search(r'(\d{10,})', url)
+        fbid = match_id.group(1) if match_id else None
+        
+        print(f"🔎 Analizzo: {url} (ID rilevato: {fbid})")
 
+        # Se ha un ID e non è già presente nel foglio
+        if fbid and fbid not in id_esistenti:
+            msg = p.get('message', '')
+            # Accettiamo Reel, Video, Watch e anche i Post che contengono un ID video
+            if any(x in url for x in ["reel", "video", "watch", "posts"]):
+                tipo_i, citta, cat = analizza_testo_annuncio(msg)
+                ticket = estrai_ticket(msg)
+                
+                riga = [""] * len(headers)
+                if "Tipo" in col: riga[col["Tipo"]] = "POST"
+                if "Data" in col: riga[col["Data"]] = p.get('created_time').split('T')[0]
+                if "Descrizione" in col: riga[col["Descrizione"]] = msg
+                if "Tipologia_Immobile" in col: riga[col["Tipologia_Immobile"]] = tipo_i
+                if "Citta" in col: riga[col["Citta"]] = citta
+                if "Link_Facebook" in col: riga[col["Link_Facebook"]] = url
+                if "Ticket" in col: riga[col["Ticket"]] = ticket
+                
+                sheet.append_row(riga)
+                id_esistenti.append(fbid) # Evitiamo doppioni nello stesso ciclo
+                print(f"✅ AGGIUNTO: {fbid} con Ticket: {ticket}")
+        else:
+            if fbid: print(f"⏭️ Saltato (già presente o ID non valido): {fbid}")
     # 2. AGGIORNAMENTO STATISTICHE (Il vero lavoro da commercialista)
     print("📊 Aggiornamento visualizzazioni in corso...")
     # Ricarichiamo i dati dopo le aggiunte
