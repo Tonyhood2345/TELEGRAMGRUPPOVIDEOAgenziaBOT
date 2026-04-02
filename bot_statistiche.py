@@ -31,8 +31,11 @@ def main():
         creds_gs = Credentials.from_service_account_info(creds_dict, scopes=["https://www.googleapis.com/auth/spreadsheets"])
         gc = gspread.authorize(creds_gs)
         
-        # Prova ad aprire il foglio (usa sheet1 o 'DATABASE_IMMOBILI')
-        sheet = gc.open_by_key(SHEET_ID).sheet1
+        # --- MODIFICA IMPORTANTE QUI ---
+        # Cambia "Foglio1" con il nome esatto della tua scheda se è diverso!
+        NOME_SCHEDA = "Foglio1" 
+        sheet = gc.open_by_key(SHEET_ID).worksheet(NOME_SCHEDA)
+        # -------------------------------
         
         # Setup YouTube
         youtube = build('youtube', 'v3', developerKey=YT_API_KEY)
@@ -74,7 +77,7 @@ def main():
                     try:
                         req = youtube.videos().list(part="statistics", id=yt_id)
                         res = req.execute()
-                        if res['items']:
+                        if res.get('items'):
                             stats = res['items'][0]['statistics']
                             tot_views += int(stats.get('viewCount', 0))
                             tot_likes += int(stats.get('likeCount', 0))
