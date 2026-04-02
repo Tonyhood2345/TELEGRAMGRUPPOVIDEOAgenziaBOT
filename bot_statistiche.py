@@ -2,12 +2,10 @@ import os
 import json
 import requests
 import gspread
-import subprocess
 import re
 from google.oauth2.service_account import Credentials
 from google.oauth2.credentials import Credentials as OauthCredentials
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
 from datetime import datetime
 
 # --- CONFIGURAZIONE ---
@@ -17,40 +15,20 @@ FB_PAGE_ID = os.environ.get("FB_PAGE_ID")
 YT2_CLIENT_ID = os.environ.get("YT2_CLIENT_ID")
 YT2_CLIENT_SECRET = os.environ.get("YT2_CLIENT_SECRET")
 YT2_REFRESH_TOKEN = os.environ.get("YT2_REFRESH_TOKEN")
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CHAT_ID = os.environ.get("CHAT_ID")
 SHEET_ID = "19m1cStsqyCvzz3-AYFJKPnrLPNaDuCXEKM8Fka76-Hc"
 
 def estrai_ticket(testo):
-    """Cerca un Ticket. Se non lo trova, ne crea uno temporaneo unico."""
     match = re.search(r'\b([A-Z0-9]+-[0-9]+)\b', testo, re.IGNORECASE)
-    if match:
-        return match.group(1).upper()
-    else:
-        # Se manca il Ticket, crea un ID basato sul momento attuale
-        return f"TEMP-{datetime.now().strftime('%Y%0m%d-%H%M%S')}"
-
-def download_video_fb(url):
-    output_filename = "video_scaricato.mp4"
-    print(f"📥 Scarico video: {url}")
-    try:
-        # Usiamo yt-dlp per catturare il video
-        comando = ['yt-dlp', '-f', 'b[ext=mp4]', url, '-o', output_filename, '--force-overwrites']
-        subprocess.run(comando, check=True)
-        return output_filename if os.path.exists(output_filename) else None
-    except Exception as e:
-        print(f"❌ Errore download: {e}")
-        return None
+    return match.group(1).upper() if match else ""
 
 def analizza_testo_annuncio(testo):
     if not testo: return "Altro", "Non specificata", "📢 Altro"
     t = testo.lower()
-    t_clean = t.replace("corso vittorio veneto", "").replace("giancani", "").replace("immobiliare", "")
-    tipologie = {"villa": "Villa", "appartamento": "Appartamento", "casa singola": "Casa Singola", "terreno": "Terreno"}
-    tipo_imm = next((v for k, v in tipologie.items() if k in t_clean), "Altro")
+    tipologies = {"villa": "Villa", "appartamento": "Appartamento", "casa singola": "Casa Singola", "terreno": "Terreno"}
+    tipo_imm = next((v for k, v in tipologies.items() if k in t), "Altro")
     mappa_citta = {"favara": "Favara", "agrigento": "Agrigento", "licata": "Licata", "aragona": "Aragona"}
-    citta = next((v for k, v in mappa_citta.items() if re.search(r'\b' + re.escape(k) + r'\b', t_clean)), "Non specificata")
-    cat = "💰 Ribasso" if any(x in t for x in ["ribasso", "occasione", "affare"]) else "🏠 Vendita" if any(x in t for x in ["vendita", "vendesi"]) else "📢 Altro"
+    citta = next((v for k, v in mappa_citta.items() if re.search(r'\b' + re.escape(k) + r'\b', t)), "Non specificata")
+    cat = "🏠 Vendita" if any(x in t for x in ["vendita", "vendesi"]) else "📢 Altro"
     return tipo_imm, citta, cat
 
 def get_google_services():
@@ -65,39 +43,24 @@ def main():
     raw = sheet.get_all_values()
     headers = raw[0]
     col = {n: headers.index(n) for n in headers if n.strip()}
+    
+    # 1. RECUPERO NUOVI LINK DA FACEBOOK (SENZA PUBBLICARE)
+    print("🕵️ Controllo nuovi post su Facebook...")
     records = [dict(zip(headers, r + [""]*(len(headers)-len(r)))) for r in raw[1:]]
-
-    # 1. SCOPERTA NUOVI POST (Carica TUTTO quello che trova)
-    print("🕵️ Controllo nuovi post (Video e Reel) su Facebook...")
     link_esistenti = [str(r.get("Link_Facebook", "")) for r in records]
-    url_fb = f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}/published_posts?fields=message,created_time,permalink_url&limit=50&access_token={FB_PAGE_TOKEN}"
+    
+    # Leggiamo gli ultimi 100 post (per coprire i mesi scorsi)
+    url_fb = f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}/published_posts?fields=message,created_time,permalink_url&limit=100&access_token={FB_PAGE_TOKEN}"
     fb_data = requests.get(url_fb).json().get('data', [])
     
     for p in reversed(fb_data):
         url = p.get('permalink_url', '')
-        # Se è un video/reel e non l'abbiamo già nel foglio
         if url and ("/videos/" in url or "/reel/" in url) and url not in link_esistenti:
             msg = p.get('message', '')
             tipo_i, citta, cat = analizza_testo_annuncio(msg)
             ticket = estrai_ticket(msg)
             
-            video_file = download_video_fb(url)
-            yt_link = ""
-            if video_file:
-                print(f"🎬 Pubblicazione forzata su YouTube/Telegram per: {ticket}")
-                try:
-                    # Carica su YouTube
-                    body = {'snippet': {'title': f"Immobile {ticket} - {citta}", 'description': msg}, 'status': {'privacyStatus': 'public'}}
-                    res = youtube.videos().insert(part='snippet,status', body=body, media_body=MediaFileUpload(video_file, resumable=True)).execute()
-                    yt_link = f"https://www.youtube.com/watch?v={res['id']}"
-                    
-                    # Telegram
-                    requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo", data={"chat_id": CHAT_ID, "caption": f"🆕 {ticket}\n\n{msg}"[:1024]}, files={"video": open(video_file, "rb")})
-                except Exception as e: print(f"Errore YT/TG: {e}")
-                finally: 
-                    if os.path.exists(video_file): os.remove(video_file)
-
-            # Aggiungi al database
+            # Aggiungiamo la riga "vuota" (senza link YT che non abbiamo creato)
             riga = [""] * len(headers)
             if "Tipo" in col: riga[col["Tipo"]] = "POST"
             if "Data" in col: riga[col["Data"]] = p.get('created_time').split('T')[0]
@@ -105,27 +68,29 @@ def main():
             if "Tipologia_Immobile" in col: riga[col["Tipologia_Immobile"]] = tipo_i
             if "Citta" in col: riga[col["Citta"]] = citta
             if "Link_Facebook" in col: riga[col["Link_Facebook"]] = url
-            if "Link_YouTube" in col: riga[col["Link_YouTube"]] = yt_link
             if "Ticket" in col: riga[col["Ticket"]] = ticket
             
             sheet.append_row(riga)
-            print(f"✅ Inserito con successo: {ticket}")
+            print(f"✅ Nuovo annuncio trovato e aggiunto: {ticket if ticket else 'Senza Ticket'}")
 
-    # 2. AGGIORNAMENTO STATISTICHE (Ricalcola tutto)
-    print("📊 Aggiornamento visite in corso...")
+    # 2. AGGIORNAMENTO STATISTICHE (Il vero lavoro da commercialista)
+    print("📊 Aggiornamento visualizzazioni in corso...")
+    # Ricarichiamo i dati dopo le aggiunte
     records = [dict(zip(headers, r + [""]*(len(headers)-len(r)))) for r in sheet.get_all_values()[1:]]
     aggiornamenti = []
     
     for i, r in enumerate(records, start=2):
         visite_tot = 0
-        link_fb = r.get("Link_Facebook", "")
-        fbid = re.search(r"(?:videos/|reel/)(\d+)", link_fb)
+        
+        # Conta FB
+        fbid = re.search(r"(?:videos/|reel/)(\d+)", r.get("Link_Facebook", ""))
         if fbid:
             try:
                 res = requests.get(f"https://graph.facebook.com/v18.0/{fbid.group(1)}?fields=views&access_token={FB_PAGE_TOKEN}").json()
                 visite_tot += int(res.get('views', 0))
             except: pass
 
+        # Conta YT (se hai messo il link a mano o se esiste)
         ytid = re.search(r"(?:v=|youtu\.be/)([^&]+)", r.get("Link_YouTube", ""))
         if ytid:
             try:
@@ -139,8 +104,9 @@ def main():
 
     if aggiornamenti:
         sheet.batch_update(aggiornamenti)
-    
-    print("🎉 Operazione completata! Tutto aggiornato.")
+        print(f"✅ Statistiche aggiornate per {len(aggiornamenti)} righe.")
+
+    print("🎉 Il commercialista ha finito ed è andato a dormire.")
 
 if __name__ == "__main__":
     main()
