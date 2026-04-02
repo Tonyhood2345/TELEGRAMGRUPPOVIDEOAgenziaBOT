@@ -11,7 +11,6 @@ GOOGLE_SECRETS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
 FB_PAGE_TOKEN = os.environ.get("FB_PAGE_TOKEN")
 YT_API_KEY = os.environ.get("YT_API_KEY")
 
-# Usa l'ID del foglio che usi su GitHub per la pubblicazione
 SHEET_ID = "19m1cStsqyCvzz3-AYFJKPnrLPNaDuCXEKM8Fka76-Hc" 
 
 def extract_yt_id(url):
@@ -19,7 +18,8 @@ def extract_yt_id(url):
     return match.group(1) if match else None
 
 def extract_fb_id(url):
-    match = re.search(r"videos/(\d+)", str(url))
+    # MODIFICA: Ora legge sia i "videos/" che i "reel/"
+    match = re.search(r"(?:videos/|reel/)(\d+)", str(url))
     return match.group(1) if match else None
 
 def main():
@@ -31,11 +31,8 @@ def main():
         creds_gs = Credentials.from_service_account_info(creds_dict, scopes=["https://www.googleapis.com/auth/spreadsheets"])
         gc = gspread.authorize(creds_gs)
         
-        # --- MODIFICA IMPORTANTE QUI ---
-        # Cambia "Foglio1" con il nome esatto della tua scheda se è diverso!
-        NOME_SCHEDA = "Foglio1" 
-        sheet = gc.open_by_key(SHEET_ID).worksheet(NOME_SCHEDA)
-        # -------------------------------
+        # Lasciamo sheet1 che seleziona il primo foglio in automatico
+        sheet = gc.open_by_key(SHEET_ID).sheet1
         
         # Setup YouTube
         youtube = build('youtube', 'v3', developerKey=YT_API_KEY)
@@ -43,7 +40,7 @@ def main():
         records = sheet.get_all_records()
         headers = sheet.row_values(1)
         
-        # Trova la posizione esatta delle colonne nel tuo Excel
+        # Trova la posizione delle colonne
         try:
             idx_yt = headers.index("Link_YouTube") + 1
             idx_fb = headers.index("Link_Facebook") + 1
@@ -52,7 +49,7 @@ def main():
             idx_comments = headers.index("Commenti") + 1
             idx_shares = headers.index("Condivisioni") + 1
         except ValueError:
-            print("⚠️ Errore: Colonne non trovate! Hai creato le colonne 'Link_YouTube', 'Visualizzazioni', ecc.?")
+            print("⚠️ Errore: Colonne non trovate nel foglio Excel!")
             return
 
         aggiornamenti = []
@@ -70,7 +67,7 @@ def main():
             tot_comments = 0
             tot_shares = 0
             
-            # --- LEGGI STATISTICHE YOUTUBE ---
+            # --- YOUTUBE ---
             if yt_url:
                 yt_id = extract_yt_id(yt_url)
                 if yt_id:
@@ -85,12 +82,11 @@ def main():
                     except Exception as e:
                         print(f"⚠️ Errore YT (Riga {i}): {e}")
 
-            # --- LEGGI STATISTICHE FACEBOOK ---
+            # --- FACEBOOK ---
             if fb_url:
                 fb_id = extract_fb_id(fb_url)
                 if fb_id:
                     try:
-                        # Richiede a FB le views, likes, commenti e condivisioni del video
                         url = f"https://graph.facebook.com/v18.0/{fb_id}?fields=views,likes.summary(true),comments.summary(true),shares&access_token={FB_PAGE_TOKEN}"
                         r = requests.get(url).json()
                         
@@ -102,22 +98,20 @@ def main():
                         if 'shares' in r:
                             tot_shares += int(r['shares'].get('count', 0))
                     except Exception as e:
-                        print(f"⚠️ Errore FB (Riga {i}): {e}")
+                        pass # Ignora gli errori se il video è privato o rimosso
                         
-            # Prepara il "pacchetto" di aggiornamenti per il foglio Excel
+            # Prepara l'aggiornamento
             aggiornamenti.append({'range': gspread.utils.rowcol_to_a1(i, idx_views), 'values': [[tot_views]]})
             aggiornamenti.append({'range': gspread.utils.rowcol_to_a1(i, idx_likes), 'values': [[tot_likes]]})
             aggiornamenti.append({'range': gspread.utils.rowcol_to_a1(i, idx_comments), 'values': [[tot_comments]]})
             aggiornamenti.append({'range': gspread.utils.rowcol_to_a1(i, idx_shares), 'values': [[tot_shares]]})
             
-            print(f"✅ Riga {i} aggiornata: {tot_views} Views | {tot_likes} Likes | {tot_comments} Commenti | {tot_shares} Condivisioni")
+            print(f"✅ Riga {i} calcolata: {tot_views} Views | {tot_likes} Likes | {tot_comments} Commenti")
 
-        # Invia tutti gli aggiornamenti al foglio Excel in un colpo solo
+        # Invia gli aggiornamenti al foglio
         if aggiornamenti:
             sheet.batch_update(aggiornamenti)
             print("🎉 FOGLIO EXCEL AGGIORNATO CON SUCCESSO!")
-        else:
-            print("Nessun link social trovato per aggiornare le statistiche.")
 
     except Exception as e:
         print(f"❌ Errore critico nel Bot Spia: {e}")
