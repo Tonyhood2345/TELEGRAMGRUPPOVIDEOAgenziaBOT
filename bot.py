@@ -20,8 +20,8 @@ YT2_REFRESH_TOKEN = os.environ.get("YT2_REFRESH_TOKEN")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
-# HO AGGIORNATO L'ID DEL FOGLIO CON QUELLO DEL TUO LINK
-SHEET_ID = "1s68pw0WEUcV0ZqltiahAqCp_r5rsycSjxKNh0VZQq_g"
+# --- MODIFICA FONDAMENTALE: Uso l'ID del foglio ORIGINALE (non quello con IMPORTRANGE) ---
+SHEET_ID = "19m1cStsqyCvzz3-AYFJKPnrLPNaDuCXEKM8Fka76-Hc"
 
 def modifica_testo_annuncio(testo_originale):
     """
@@ -50,12 +50,15 @@ def get_google_services():
 
 def main():
     gc, youtube = get_google_services()
+    
+    # Se nel file originale il foglio non si chiama DATABASE_IMMOBILI ma, ad esempio, Foglio1, cambialo qui sotto:
     sheet = gc.open_by_key(SHEET_ID).worksheet("DATABASE_IMMOBILI")
     
     raw = sheet.get_all_values()
     headers = raw[0]
-    col = {n: headers.index(n) for n in headers if n.strip()}
-    records = [dict(zip(headers, r + [""]*(len(headers)-len(r)))) for r in raw[1:]]
+    # Rimuovo eventuali spazi bianchi dai nomi delle colonne per sicurezza
+    col = {n.strip(): headers.index(n) for n in headers if n.strip()}
+    records = [dict(zip([h.strip() for h in headers], r + [""]*(len(headers)-len(r)))) for r in raw[1:]]
 
     # --- RICERCA POST DA RICICLARE E SALVATAGGIO DELLA RIGA ---
     post_da_riciclare = None
@@ -107,15 +110,18 @@ def main():
             # --- AGGIORNAMENTO EXCEL ---
             
             # FASE A: Disattiviamo il vecchio post in modo che non venga più riciclato
-            col_pubblicato_idx = headers.index("Pubblicato") + 1 # +1 perché gspread usa indici base 1
+            # Cerco l'indice esatto pulendo gli spazi
+            col_pubblicato_idx = [h.strip() for h in headers].index("Pubblicato") + 1
             sheet.update_cell(riga_foglio_originale, col_pubblicato_idx, "RICICLATO")
             print(f"🔄 Vecchia riga {riga_foglio_originale} aggiornata a 'RICICLATO'.")
 
             # FASE B: Creiamo una nuova riga per la pubblicazione di oggi
             nuova_riga = [""] * len(headers)
             # Uso .get() per evitare errori se la colonna non esiste
-            nuova_riga[col.get("Tipo", 0)] = "POST"
-            nuova_riga[col.get("Data", 1)] = datetime.now().strftime("%Y-%m-%d")
+            if "Tipo" in col:
+                nuova_riga[col["Tipo"]] = "POST"
+            if "Data" in col:
+                nuova_riga[col["Data"]] = datetime.now().strftime("%Y-%m-%d")
             
             if "Tipologia" in col:
                 nuova_riga[col["Tipologia"]] = post_da_riciclare.get("Tipologia", "")
@@ -132,7 +138,8 @@ def main():
             
             # Impostiamo di nuovo "SI" sulla riga appena creata, 
             # così in futuro (quando toccherà a lei) potrà essere a sua volta riciclata!
-            nuova_riga[headers.index("Pubblicato")] = "SI" 
+            if "Pubblicato" in col:
+                nuova_riga[col["Pubblicato"]] = "SI" 
             
             sheet.append_row(nuova_riga)
             print(f"📝 Nuova riga aggiunta in Excel per il riciclo di oggi.")
