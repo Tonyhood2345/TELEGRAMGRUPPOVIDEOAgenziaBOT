@@ -2,153 +2,127 @@ import os
 import json
 import requests
 import gspread
-import subprocess
 import re
 from google.oauth2.service_account import Credentials
-from google.oauth2.credentials import Credentials as OauthCredentials
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-from datetime import datetime
 
 # --- CONFIGURAZIONE ---
 GOOGLE_SECRETS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
 FB_PAGE_TOKEN = os.environ.get("FB_PAGE_TOKEN")
-FB_PAGE_ID = os.environ.get("FB_PAGE_ID")
 YT2_CLIENT_ID = os.environ.get("YT2_CLIENT_ID")
 YT2_CLIENT_SECRET = os.environ.get("YT2_CLIENT_SECRET")
 YT2_REFRESH_TOKEN = os.environ.get("YT2_REFRESH_TOKEN")
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CHAT_ID = os.environ.get("CHAT_ID")
 
-# --- MODIFICA FONDAMENTALE: Uso l'ID del foglio ORIGINALE (non quello con IMPORTRANGE) ---
+# ID DEL FOGLIO ORIGINALE (dove ci sono fisicamente i dati)
 SHEET_ID = "19m1cStsqyCvzz3-AYFJKPnrLPNaDuCXEKM8Fka76-Hc"
 
-def modifica_testo_annuncio(testo_originale):
-    """
-    Riprende il vecchio testo e lo rinfresca per la ripubblicazione.
-    """
-    intro = "🌟 UN GRANDE CLASSICO SEMPRE ATTUALE 🌟\n\n"
-    testo_modificato = f"{intro}{testo_originale}\n\n#repost #immobiliaregiancani #favara"
-    return testo_modificato
-
-def download_video_fb(url):
-    output_filename = "video_riciclo.mp4"
-    print(f"📥 Scaricamento video da: {url}")
-    try:
-        comando = ['yt-dlp', '-f', 'b[ext=mp4]', url, '-o', output_filename, '--force-overwrites']
-        subprocess.run(comando, check=True)
-        return output_filename if os.path.exists(output_filename) else None
-    except Exception as e:
-        print(f"❌ Errore download: {e}")
-        return None
-
 def get_google_services():
+    """Autenticazione a Google Sheets e YouTube"""
     creds_dict = json.loads(GOOGLE_SECRETS)
-    creds_g = Credentials.from_service_account_info(creds_dict, scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"])
+    creds_g = Credentials.from_service_account_info(creds_dict, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+    
+    # Per le statistiche pubbliche di YouTube spesso basta l'API Key, ma usiamo il tuo setup Oauth
+    from google.oauth2.credentials import Credentials as OauthCredentials
     creds_yt = OauthCredentials(token=None, refresh_token=YT2_REFRESH_TOKEN, client_id=YT2_CLIENT_ID, client_secret=YT2_CLIENT_SECRET, token_uri="https://oauth2.googleapis.com/token")
+    
     return gspread.authorize(creds_g), build('youtube', 'v3', credentials=creds_yt)
+
+def extract_yt_id(url):
+    """Estrae l'ID del video da un link YouTube"""
+    match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11}).*", url)
+    return match.group(1) if match else None
+
+def extract_fb_id(url):
+    """Estrae l'ID del video da un link Facebook"""
+    match = re.search(r"videos\/(\d+)", url)
+    return match.group(1) if match else None
 
 def main():
     gc, youtube = get_google_services()
-    
-    # Se nel file originale il foglio non si chiama DATABASE_IMMOBILI ma, ad esempio, Foglio1, cambialo qui sotto:
     sheet = gc.open_by_key(SHEET_ID).worksheet("DATABASE_IMMOBILI")
     
     raw = sheet.get_all_values()
-    headers = raw[0]
-    # Rimuovo eventuali spazi bianchi dai nomi delle colonne per sicurezza
-    col = {n.strip(): headers.index(n) for n in headers if n.strip()}
-    records = [dict(zip([h.strip() for h in headers], r + [""]*(len(headers)-len(r)))) for r in raw[1:]]
+    headers = [h.strip() for h in raw[0]]
+    col = {n: headers.index(n) for n in headers if n}
+    records = [dict(zip(headers, r + [""]*(len(headers)-len(r)))) for r in raw[1:]]
 
-    # --- RICERCA POST DA RICICLARE E SALVATAGGIO DELLA RIGA ---
-    post_da_riciclare = None
-    riga_foglio_originale = None # Ci serve per sapere quale riga aggiornare
+    # Identifico le colonne da aggiornare (+1 perché gspread parte da 1 e non da 0)
+    col_vis = col.get("Visualizzazioni", -1) + 1
+    col_like = col.get("Mi_Piace", -1) + 1
+    col_comm = col.get("Commenti", -1) + 1
+    col_cond = col.get("Condivisioni", -1) + 1
+    col_eng = col.get("Engagement", -1) + 1
+
+    if any(c == 0 for c in [col_vis, col_like, col_comm, col_cond, col_eng]):
+        print("❌ Errore: Assicurati che le colonne Visualizzazioni, Mi_Piace, Commenti, Condivisioni, Engagement esistano nel foglio.")
+        return
 
     for index, r in enumerate(records):
-        if r.get("Link_Facebook") and str(r.get("Pubblicato", "")).strip().upper() == "SI":
-            post_da_riciclare = r
-            # index parte da 0, e la prima riga di dati in Excel è la riga 2 (la 1 è l'intestazione)
-            riga_foglio_originale = index + 2 
-            break 
-
-    if post_da_riciclare:
-        url_fb_vecchio = post_da_riciclare.get("Link_Facebook")
-        testo_vecchio = post_da_riciclare.get("Descrizione", "")
+        riga_foglio = index + 2  # Riga 1 è l'intestazione
         
-        # 1. MODIFICA IL TESTO
-        nuovo_testo = modifica_testo_annuncio(testo_vecchio)
+        link_fb = r.get("Link_Facebook", "")
+        link_yt = r.get("Link_YouTube", "")
         
-        # 2. SCARICA IL VIDEO
-        video_temp = download_video_fb(url_fb_vecchio)
+        # Saltiamo le righe vuote o senza link
+        if not link_fb and not link_yt:
+            continue
+            
+        print(f"📊 Aggiornamento statistiche riga {riga_foglio}...")
         
-        if video_temp:
-            print(f"✅ Video pronto. Inizio ripubblicazione...")
+        tot_vis = 0
+        tot_like = 0
+        tot_comm = 0
+        tot_cond = 0
 
-            # --- PUBBLICAZIONE SU FACEBOOK (NUOVO POST) ---
-            fb_url = f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}/videos"
-            with open(video_temp, 'rb') as f:
-                r_fb = requests.post(fb_url, data={'access_token': FB_PAGE_TOKEN, 'description': nuovo_testo}, files={'source': f})
-            
-            nuovo_link_fb = ""
-            if r_fb.status_code == 200:
-                nuovo_link_fb = f"https://www.facebook.com/{FB_PAGE_ID}/videos/{r_fb.json().get('id')}"
-                print(f"✅ Facebook ri-pubblicato: {nuovo_link_fb}")
+        # --- STATISTICHE YOUTUBE ---
+        if link_yt:
+            yt_id = extract_yt_id(link_yt)
+            if yt_id:
+                try:
+                    res = youtube.videos().list(part="statistics", id=yt_id).execute()
+                    if res["items"]:
+                        stats = res["items"][0]["statistics"]
+                        tot_vis += int(stats.get("viewCount", 0))
+                        tot_like += int(stats.get("likeCount", 0))
+                        tot_comm += int(stats.get("commentCount", 0))
+                except Exception as e:
+                    print(f"  ⚠️ Errore YouTube per riga {riga_foglio}: {e}")
 
-            # --- PUBBLICAZIONE SU YOUTUBE (NUOVO VIDEO) ---
-            titolo_yt = f"RIPROPOSTA: {post_da_riciclare.get('Tipologia_Immobile', 'Immobile')} a {post_da_riciclare.get('Citta', 'Favara')}"
-            body_yt = {'snippet': {'title': titolo_yt, 'description': nuovo_testo}, 'status': {'privacyStatus': 'public'}}
-            res_yt = youtube.videos().insert(part='snippet,status', body=body_yt, media_body=MediaFileUpload(video_temp, resumable=True)).execute()
-            nuovo_link_yt = f"https://www.youtube.com/watch?v={res_yt['id']}"
-            print(f"✅ YouTube ri-pubblicato: {nuovo_link_yt}")
+        # --- STATISTICHE FACEBOOK ---
+        if link_fb:
+            fb_id = extract_fb_id(link_fb)
+            if fb_id:
+                try:
+                    # Endpoint Graph API per ottenere i dati del video
+                    url = f"https://graph.facebook.com/v18.0/{fb_id}?fields=views,likes.summary(true),comments.summary(true),shares&access_token={FB_PAGE_TOKEN}"
+                    res = requests.get(url).json()
+                    
+                    tot_vis += res.get("views", 0)
+                    if "likes" in res:
+                        tot_like += res["likes"]["summary"]["total_count"]
+                    if "comments" in res:
+                        tot_comm += res["comments"]["summary"]["total_count"]
+                    if "shares" in res:
+                        tot_cond += res["shares"]["count"]
+                except Exception as e:
+                    print(f"  ⚠️ Errore Facebook per riga {riga_foglio}: {e}")
 
-            # --- PUBBLICAZIONE SU TELEGRAM ---
-            tg_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
-            with open(video_temp, "rb") as f:
-                requests.post(tg_url, data={"chat_id": CHAT_ID, "caption": nuovo_testo[:1024], "parse_mode": "HTML"}, files={"video": f})
-            print(f"✅ Telegram ri-pubblicato.")
+        # Calcolo Engagement Totale (somma delle interazioni attive)
+        tot_eng = tot_like + tot_comm + tot_cond
 
-            # --- AGGIORNAMENTO EXCEL ---
-            
-            # FASE A: Disattiviamo il vecchio post in modo che non venga più riciclato
-            # Cerco l'indice esatto pulendo gli spazi
-            col_pubblicato_idx = [h.strip() for h in headers].index("Pubblicato") + 1
-            sheet.update_cell(riga_foglio_originale, col_pubblicato_idx, "RICICLATO")
-            print(f"🔄 Vecchia riga {riga_foglio_originale} aggiornata a 'RICICLATO'.")
-
-            # FASE B: Creiamo una nuova riga per la pubblicazione di oggi
-            nuova_riga = [""] * len(headers)
-            # Uso .get() per evitare errori se la colonna non esiste
-            if "Tipo" in col:
-                nuova_riga[col["Tipo"]] = "POST"
-            if "Data" in col:
-                nuova_riga[col["Data"]] = datetime.now().strftime("%Y-%m-%d")
-            
-            if "Tipologia" in col:
-                nuova_riga[col["Tipologia"]] = post_da_riciclare.get("Tipologia", "")
-            if "Descrizione" in col:
-                nuova_riga[col["Descrizione"]] = nuovo_testo
-            if "Tipologia_Immobile" in col:
-                nuova_riga[col["Tipologia_Immobile"]] = post_da_riciclare.get("Tipologia_Immobile", "")
-            if "Citta" in col:
-                nuova_riga[col["Citta"]] = post_da_riciclare.get("Citta", "")
-            if "Link_Facebook" in col:
-                nuova_riga[col["Link_Facebook"]] = nuovo_link_fb
-            if "Link_YouTube" in col:
-                nuova_riga[col["Link_YouTube"]] = nuovo_link_yt
-            
-            # Impostiamo di nuovo "SI" sulla riga appena creata, 
-            # così in futuro (quando toccherà a lei) potrà essere a sua volta riciclata!
-            if "Pubblicato" in col:
-                nuova_riga[col["Pubblicato"]] = "SI" 
-            
-            sheet.append_row(nuova_riga)
-            print(f"📝 Nuova riga aggiunta in Excel per il riciclo di oggi.")
-            
-            os.remove(video_temp)
-        else:
-            print("❌ Errore critico: Impossibile scaricare il video dal vecchio link.")
-    else:
-        print("ℹ️ Nessun vecchio post trovato da riciclare.")
+        # --- AGGIORNAMENTO FOGLIO GOOGLE ---
+        # Aggiorniamo le singole celle per questa riga
+        try:
+            sheet.update_cell(riga_foglio, col_vis, tot_vis)
+            sheet.update_cell(riga_foglio, col_like, tot_like)
+            sheet.update_cell(riga_foglio, col_comm, tot_comm)
+            sheet.update_cell(riga_foglio, col_cond, tot_cond)
+            sheet.update_cell(riga_foglio, col_eng, tot_eng)
+            print(f"  ✅ Dati salvati: {tot_vis} Vis | {tot_like} Like | {tot_comm} Comm | {tot_cond} Cond")
+        except Exception as e:
+            print(f"  ❌ Errore salvataggio su Google Sheets riga {riga_foglio}: {e}")
 
 if __name__ == "__main__":
+    print("🚀 Avvio bot aggiornamento statistiche...")
     main()
+    print("🏁 Aggiornamento completato.")
