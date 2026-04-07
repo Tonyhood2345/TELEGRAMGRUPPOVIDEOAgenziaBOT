@@ -20,16 +20,11 @@ YT2_REFRESH_TOKEN = os.environ.get("YT2_REFRESH_TOKEN")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
-# --- MODIFICA FONDAMENTALE: Uso l'ID del foglio ORIGINALE (non quello con IMPORTRANGE) ---
 SHEET_ID = "19m1cStsqyCvzz3-AYFJKPnrLPNaDuCXEKM8Fka76-Hc"
 
 def modifica_testo_annuncio(testo_originale):
-    """
-    Riprende il vecchio testo e lo rinfresca per la ripubblicazione.
-    """
     intro = "🌟 UN GRANDE CLASSICO SEMPRE ATTUALE 🌟\n\n"
-    testo_modificato = f"{intro}{testo_originale}\n\n#repost #immobiliaregiancani #favara"
-    return testo_modificato
+    return f"{intro}{testo_originale}\n\n#repost #immobiliaregiancani #favara"
 
 def download_video_fb(url):
     output_filename = "video_riciclo.mp4"
@@ -50,41 +45,51 @@ def get_google_services():
 
 def main():
     gc, youtube = get_google_services()
-    
-    # Se nel file originale il foglio non si chiama DATABASE_IMMOBILI ma, ad esempio, Foglio1, cambialo qui sotto:
     sheet = gc.open_by_key(SHEET_ID).worksheet("DATABASE_IMMOBILI")
     
     raw = sheet.get_all_values()
-    headers = raw[0]
-    # Rimuovo eventuali spazi bianchi dai nomi delle colonne per sicurezza
-    col = {n.strip(): headers.index(n) for n in headers if n.strip()}
-    records = [dict(zip([h.strip() for h in headers], r + [""]*(len(headers)-len(r)))) for r in raw[1:]]
+    
+    # Pulizia estrema degli header per evitare problemi con spazi o a capo invisibili
+    headers = [str(h).strip().replace('\n', '').replace('\r', '') for h in raw[0]]
+    col = {n: headers.index(n) for n in headers if n}
+    
+    # Creazione dei record allineati
+    records = []
+    for r in raw[1:]:
+        # Riempiamo le celle vuote se la riga è più corta degli header
+        r_completa = r + [""] * (len(headers) - len(r))
+        records.append(dict(zip(headers, r_completa)))
 
-    # --- RICERCA POST DA RICICLARE E SALVATAGGIO DELLA RIGA ---
+    print(f"🕵️ DIAGNOSTICA: Trovate {len(records)} righe. Colonne riconosciute: {headers}")
+
     post_da_riciclare = None
-    riga_foglio_originale = None # Ci serve per sapere quale riga aggiornare
+    riga_foglio_originale = None 
 
     for index, r in enumerate(records):
-        if r.get("Link_Facebook") and str(r.get("Pubblicato", "")).strip().upper() == "SI":
+        link_fb = str(r.get("Link_Facebook", "")).strip()
+        pubblicato = str(r.get("Pubblicato", "")).strip().upper()
+        
+        # Stampa le prime 5 righe per capire cosa legge
+        if index < 5:
+            print(f"🔍 [Riga {index+2}] -> FB: '{link_fb[:30]}...' | Pubblicato: '{pubblicato}' | Città: '{r.get('Citta', '')}'")
+
+        if link_fb and pubblicato == "SI":
             post_da_riciclare = r
-            # index parte da 0, e la prima riga di dati in Excel è la riga 2 (la 1 è l'intestazione)
             riga_foglio_originale = index + 2 
+            print(f"🎯 TROVATO! Post da riciclare alla riga {riga_foglio_originale}")
             break 
 
     if post_da_riciclare:
         url_fb_vecchio = post_da_riciclare.get("Link_Facebook")
         testo_vecchio = post_da_riciclare.get("Descrizione", "")
         
-        # 1. MODIFICA IL TESTO
         nuovo_testo = modifica_testo_annuncio(testo_vecchio)
-        
-        # 2. SCARICA IL VIDEO
         video_temp = download_video_fb(url_fb_vecchio)
         
         if video_temp:
             print(f"✅ Video pronto. Inizio ripubblicazione...")
 
-            # --- PUBBLICAZIONE SU FACEBOOK (NUOVO POST) ---
+            # --- FACEBOOK ---
             fb_url = f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}/videos"
             with open(video_temp, 'rb') as f:
                 r_fb = requests.post(fb_url, data={'access_token': FB_PAGE_TOKEN, 'description': nuovo_testo}, files={'source': f})
@@ -92,61 +97,43 @@ def main():
             nuovo_link_fb = ""
             if r_fb.status_code == 200:
                 nuovo_link_fb = f"https://www.facebook.com/{FB_PAGE_ID}/videos/{r_fb.json().get('id')}"
-                print(f"✅ Facebook ri-pubblicato: {nuovo_link_fb}")
+                print(f"✅ Facebook: {nuovo_link_fb}")
 
-            # --- PUBBLICAZIONE SU YOUTUBE (NUOVO VIDEO) ---
+            # --- YOUTUBE ---
             titolo_yt = f"RIPROPOSTA: {post_da_riciclare.get('Tipologia_Immobile', 'Immobile')} a {post_da_riciclare.get('Citta', 'Favara')}"
             body_yt = {'snippet': {'title': titolo_yt, 'description': nuovo_testo}, 'status': {'privacyStatus': 'public'}}
             res_yt = youtube.videos().insert(part='snippet,status', body=body_yt, media_body=MediaFileUpload(video_temp, resumable=True)).execute()
             nuovo_link_yt = f"https://www.youtube.com/watch?v={res_yt['id']}"
-            print(f"✅ YouTube ri-pubblicato: {nuovo_link_yt}")
+            print(f"✅ YouTube: {nuovo_link_yt}")
 
-            # --- PUBBLICAZIONE SU TELEGRAM ---
+            # --- TELEGRAM ---
             tg_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
             with open(video_temp, "rb") as f:
                 requests.post(tg_url, data={"chat_id": CHAT_ID, "caption": nuovo_testo[:1024], "parse_mode": "HTML"}, files={"video": f})
-            print(f"✅ Telegram ri-pubblicato.")
+            print(f"✅ Telegram inviato.")
 
             # --- AGGIORNAMENTO EXCEL ---
-            
-            # FASE A: Disattiviamo il vecchio post in modo che non venga più riciclato
-            # Cerco l'indice esatto pulendo gli spazi
-            col_pubblicato_idx = [h.strip() for h in headers].index("Pubblicato") + 1
+            col_pubblicato_idx = headers.index("Pubblicato") + 1
             sheet.update_cell(riga_foglio_originale, col_pubblicato_idx, "RICICLATO")
-            print(f"🔄 Vecchia riga {riga_foglio_originale} aggiornata a 'RICICLATO'.")
+            print(f"🔄 Riga {riga_foglio_originale} impostata a 'RICICLATO'.")
 
-            # FASE B: Creiamo una nuova riga per la pubblicazione di oggi
             nuova_riga = [""] * len(headers)
-            # Uso .get() per evitare errori se la colonna non esiste
-            if "Tipo" in col:
-                nuova_riga[col["Tipo"]] = "POST"
-            if "Data" in col:
-                nuova_riga[col["Data"]] = datetime.now().strftime("%Y-%m-%d")
-            
-            if "Tipologia" in col:
-                nuova_riga[col["Tipologia"]] = post_da_riciclare.get("Tipologia", "")
-            if "Descrizione" in col:
-                nuova_riga[col["Descrizione"]] = nuovo_testo
-            if "Tipologia_Immobile" in col:
-                nuova_riga[col["Tipologia_Immobile"]] = post_da_riciclare.get("Tipologia_Immobile", "")
-            if "Citta" in col:
-                nuova_riga[col["Citta"]] = post_da_riciclare.get("Citta", "")
-            if "Link_Facebook" in col:
-                nuova_riga[col["Link_Facebook"]] = nuovo_link_fb
-            if "Link_YouTube" in col:
-                nuova_riga[col["Link_YouTube"]] = nuovo_link_yt
-            
-            # Impostiamo di nuovo "SI" sulla riga appena creata, 
-            # così in futuro (quando toccherà a lei) potrà essere a sua volta riciclata!
-            if "Pubblicato" in col:
-                nuova_riga[col["Pubblicato"]] = "SI" 
+            if "Tipo" in col: nuova_riga[col["Tipo"]] = "POST"
+            if "Data" in col: nuova_riga[col["Data"]] = datetime.now().strftime("%Y-%m-%d")
+            if "Tipologia" in col: nuova_riga[col["Tipologia"]] = post_da_riciclare.get("Tipologia", "")
+            if "Descrizione" in col: nuova_riga[col["Descrizione"]] = nuovo_testo
+            if "Tipologia_Immobile" in col: nuova_riga[col["Tipologia_Immobile"]] = post_da_riciclare.get("Tipologia_Immobile", "")
+            if "Citta" in col: nuova_riga[col["Citta"]] = post_da_riciclare.get("Citta", "")
+            if "Link_Facebook" in col: nuova_riga[col["Link_Facebook"]] = nuovo_link_fb
+            if "Link_YouTube" in col: nuova_riga[col["Link_YouTube"]] = nuovo_link_yt
+            if "Pubblicato" in col: nuova_riga[col["Pubblicato"]] = "SI" 
             
             sheet.append_row(nuova_riga)
-            print(f"📝 Nuova riga aggiunta in Excel per il riciclo di oggi.")
+            print(f"📝 Nuova riga aggiunta per il riciclo futuro.")
             
             os.remove(video_temp)
         else:
-            print("❌ Errore critico: Impossibile scaricare il video dal vecchio link.")
+            print("❌ Errore critico: Impossibile scaricare il video.")
     else:
         print("ℹ️ Nessun vecchio post trovato da riciclare.")
 
