@@ -2,10 +2,12 @@ import os
 import json
 import requests
 import gspread
+import subprocess
 import re
 from google.oauth2.service_account import Credentials
 from google.oauth2.credentials import Credentials as OauthCredentials
 from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 from datetime import datetime
 
 # --- CONFIGURAZIONE ---
@@ -15,109 +17,138 @@ FB_PAGE_ID = os.environ.get("FB_PAGE_ID")
 YT2_CLIENT_ID = os.environ.get("YT2_CLIENT_ID")
 YT2_CLIENT_SECRET = os.environ.get("YT2_CLIENT_SECRET")
 YT2_REFRESH_TOKEN = os.environ.get("YT2_REFRESH_TOKEN")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+CHAT_ID = os.environ.get("CHAT_ID")
+
+# --- MODIFICA FONDAMENTALE: Uso l'ID del foglio ORIGINALE (non quello con IMPORTRANGE) ---
 SHEET_ID = "19m1cStsqyCvzz3-AYFJKPnrLPNaDuCXEKM8Fka76-Hc"
 
-def estrai_ticket(testo):
-    match = re.search(r'\b([A-Z0-9]+-[0-9]+)\b', testo, re.IGNORECASE)
-    return match.group(1).upper() if match else ""
+def modifica_testo_annuncio(testo_originale):
+    """
+    Riprende il vecchio testo e lo rinfresca per la ripubblicazione.
+    """
+    intro = "🌟 UN GRANDE CLASSICO SEMPRE ATTUALE 🌟\n\n"
+    testo_modificato = f"{intro}{testo_originale}\n\n#repost #immobiliaregiancani #favara"
+    return testo_modificato
 
-def analizza_testo_annuncio(testo):
-    if not testo: return "Altro", "Non specificata", "📢 Altro"
-    t = testo.lower()
-    tipologies = {"villa": "Villa", "appartamento": "Appartamento", "casa singola": "Casa Singola", "terreno": "Terreno"}
-    tipo_imm = next((v for k, v in tipologies.items() if k in t), "Altro")
-    mappa_citta = {"favara": "Favara", "agrigento": "Agrigento", "licata": "Licata", "aragona": "Aragona"}
-    citta = next((v for k, v in mappa_citta.items() if re.search(r'\b' + re.escape(k) + r'\b', t)), "Non specificata")
-    cat = "🏠 Vendita" if any(x in t for x in ["vendita", "vendesi"]) else "📢 Altro"
-    return tipo_imm, citta, cat
+def download_video_fb(url):
+    output_filename = "video_riciclo.mp4"
+    print(f"📥 Scaricamento video da: {url}")
+    try:
+        comando = ['yt-dlp', '-f', 'b[ext=mp4]', url, '-o', output_filename, '--force-overwrites']
+        subprocess.run(comando, check=True)
+        return output_filename if os.path.exists(output_filename) else None
+    except Exception as e:
+        print(f"❌ Errore download: {e}")
+        return None
 
 def get_google_services():
     creds_dict = json.loads(GOOGLE_SECRETS)
-    creds_g = Credentials.from_service_account_info(creds_dict, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+    creds_g = Credentials.from_service_account_info(creds_dict, scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"])
     creds_yt = OauthCredentials(token=None, refresh_token=YT2_REFRESH_TOKEN, client_id=YT2_CLIENT_ID, client_secret=YT2_CLIENT_SECRET, token_uri="https://oauth2.googleapis.com/token")
     return gspread.authorize(creds_g), build('youtube', 'v3', credentials=creds_yt)
 
 def main():
     gc, youtube = get_google_services()
-    sheet = gc.open_by_key(SHEET_ID).sheet1
+    
+    # Se nel file originale il foglio non si chiama DATABASE_IMMOBILI ma, ad esempio, Foglio1, cambialo qui sotto:
+    sheet = gc.open_by_key(SHEET_ID).worksheet("DATABASE_IMMOBILI")
+    
     raw = sheet.get_all_values()
     headers = raw[0]
-    col = {n: headers.index(n) for n in headers if n.strip()}
-    
-  # 1. RECUPERO NUOVI LINK DA FACEBOOK (Versione Ultra-Sensibile)
-    print("🕵️ Scansione profonda dei post in corso...")
-    records = [dict(zip(headers, r + [""]*(len(headers)-len(r)))) for r in raw[1:]]
-    # Creiamo una lista pulita di ID per non sbagliare il confronto
-    id_esistenti = [re.search(r'(\d{10,})', str(r.get("Link_Facebook", ""))).group(1) 
-                   for r in records if re.search(r'(\d{10,})', str(r.get("Link_Facebook", "")))]
-    
-    url_fb = f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}/published_posts?fields=message,created_time,permalink_url&limit=50&access_token={FB_PAGE_TOKEN}"
-    fb_data = requests.get(url_fb).json().get('data', [])
-    
-    for p in reversed(fb_data):
-        url = p.get('permalink_url', '')
-        # Estraiamo l'ID numerico dal link che ci dà FB
-        match_id = re.search(r'(\d{10,})', url)
-        fbid = match_id.group(1) if match_id else None
-        
-        print(f"🔎 Analizzo: {url} (ID rilevato: {fbid})")
+    # Rimuovo eventuali spazi bianchi dai nomi delle colonne per sicurezza
+    col = {n.strip(): headers.index(n) for n in headers if n.strip()}
+    records = [dict(zip([h.strip() for h in headers], r + [""]*(len(headers)-len(r)))) for r in raw[1:]]
 
-        # Se ha un ID e non è già presente nel foglio
-        if fbid and fbid not in id_esistenti:
-            msg = p.get('message', '')
-            # Accettiamo Reel, Video, Watch e anche i Post che contengono un ID video
-            if any(x in url for x in ["reel", "video", "watch", "posts"]):
-                tipo_i, citta, cat = analizza_testo_annuncio(msg)
-                ticket = estrai_ticket(msg)
-                
-                riga = [""] * len(headers)
-                if "Tipo" in col: riga[col["Tipo"]] = "POST"
-                if "Data" in col: riga[col["Data"]] = p.get('created_time').split('T')[0]
-                if "Descrizione" in col: riga[col["Descrizione"]] = msg
-                if "Tipologia_Immobile" in col: riga[col["Tipologia_Immobile"]] = tipo_i
-                if "Citta" in col: riga[col["Citta"]] = citta
-                if "Link_Facebook" in col: riga[col["Link_Facebook"]] = url
-                if "Ticket" in col: riga[col["Ticket"]] = ticket
-                
-                sheet.append_row(riga)
-                id_esistenti.append(fbid) # Evitiamo doppioni nello stesso ciclo
-                print(f"✅ AGGIUNTO: {fbid} con Ticket: {ticket}")
+    # --- RICERCA POST DA RICICLARE E SALVATAGGIO DELLA RIGA ---
+    post_da_riciclare = None
+    riga_foglio_originale = None # Ci serve per sapere quale riga aggiornare
+
+    for index, r in enumerate(records):
+        if r.get("Link_Facebook") and str(r.get("Pubblicato", "")).strip().upper() == "SI":
+            post_da_riciclare = r
+            # index parte da 0, e la prima riga di dati in Excel è la riga 2 (la 1 è l'intestazione)
+            riga_foglio_originale = index + 2 
+            break 
+
+    if post_da_riciclare:
+        url_fb_vecchio = post_da_riciclare.get("Link_Facebook")
+        testo_vecchio = post_da_riciclare.get("Descrizione", "")
+        
+        # 1. MODIFICA IL TESTO
+        nuovo_testo = modifica_testo_annuncio(testo_vecchio)
+        
+        # 2. SCARICA IL VIDEO
+        video_temp = download_video_fb(url_fb_vecchio)
+        
+        if video_temp:
+            print(f"✅ Video pronto. Inizio ripubblicazione...")
+
+            # --- PUBBLICAZIONE SU FACEBOOK (NUOVO POST) ---
+            fb_url = f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}/videos"
+            with open(video_temp, 'rb') as f:
+                r_fb = requests.post(fb_url, data={'access_token': FB_PAGE_TOKEN, 'description': nuovo_testo}, files={'source': f})
+            
+            nuovo_link_fb = ""
+            if r_fb.status_code == 200:
+                nuovo_link_fb = f"https://www.facebook.com/{FB_PAGE_ID}/videos/{r_fb.json().get('id')}"
+                print(f"✅ Facebook ri-pubblicato: {nuovo_link_fb}")
+
+            # --- PUBBLICAZIONE SU YOUTUBE (NUOVO VIDEO) ---
+            titolo_yt = f"RIPROPOSTA: {post_da_riciclare.get('Tipologia_Immobile', 'Immobile')} a {post_da_riciclare.get('Citta', 'Favara')}"
+            body_yt = {'snippet': {'title': titolo_yt, 'description': nuovo_testo}, 'status': {'privacyStatus': 'public'}}
+            res_yt = youtube.videos().insert(part='snippet,status', body=body_yt, media_body=MediaFileUpload(video_temp, resumable=True)).execute()
+            nuovo_link_yt = f"https://www.youtube.com/watch?v={res_yt['id']}"
+            print(f"✅ YouTube ri-pubblicato: {nuovo_link_yt}")
+
+            # --- PUBBLICAZIONE SU TELEGRAM ---
+            tg_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
+            with open(video_temp, "rb") as f:
+                requests.post(tg_url, data={"chat_id": CHAT_ID, "caption": nuovo_testo[:1024], "parse_mode": "HTML"}, files={"video": f})
+            print(f"✅ Telegram ri-pubblicato.")
+
+            # --- AGGIORNAMENTO EXCEL ---
+            
+            # FASE A: Disattiviamo il vecchio post in modo che non venga più riciclato
+            # Cerco l'indice esatto pulendo gli spazi
+            col_pubblicato_idx = [h.strip() for h in headers].index("Pubblicato") + 1
+            sheet.update_cell(riga_foglio_originale, col_pubblicato_idx, "RICICLATO")
+            print(f"🔄 Vecchia riga {riga_foglio_originale} aggiornata a 'RICICLATO'.")
+
+            # FASE B: Creiamo una nuova riga per la pubblicazione di oggi
+            nuova_riga = [""] * len(headers)
+            # Uso .get() per evitare errori se la colonna non esiste
+            if "Tipo" in col:
+                nuova_riga[col["Tipo"]] = "POST"
+            if "Data" in col:
+                nuova_riga[col["Data"]] = datetime.now().strftime("%Y-%m-%d")
+            
+            if "Tipologia" in col:
+                nuova_riga[col["Tipologia"]] = post_da_riciclare.get("Tipologia", "")
+            if "Descrizione" in col:
+                nuova_riga[col["Descrizione"]] = nuovo_testo
+            if "Tipologia_Immobile" in col:
+                nuova_riga[col["Tipologia_Immobile"]] = post_da_riciclare.get("Tipologia_Immobile", "")
+            if "Citta" in col:
+                nuova_riga[col["Citta"]] = post_da_riciclare.get("Citta", "")
+            if "Link_Facebook" in col:
+                nuova_riga[col["Link_Facebook"]] = nuovo_link_fb
+            if "Link_YouTube" in col:
+                nuova_riga[col["Link_YouTube"]] = nuovo_link_yt
+            
+            # Impostiamo di nuovo "SI" sulla riga appena creata, 
+            # così in futuro (quando toccherà a lei) potrà essere a sua volta riciclata!
+            if "Pubblicato" in col:
+                nuova_riga[col["Pubblicato"]] = "SI" 
+            
+            sheet.append_row(nuova_riga)
+            print(f"📝 Nuova riga aggiunta in Excel per il riciclo di oggi.")
+            
+            os.remove(video_temp)
         else:
-            if fbid: print(f"⏭️ Saltato (già presente o ID non valido): {fbid}")
-    # 2. AGGIORNAMENTO STATISTICHE (Il vero lavoro da commercialista)
-    print("📊 Aggiornamento visualizzazioni in corso...")
-    # Ricarichiamo i dati dopo le aggiunte
-    records = [dict(zip(headers, r + [""]*(len(headers)-len(r)))) for r in sheet.get_all_values()[1:]]
-    aggiornamenti = []
-    
-    for i, r in enumerate(records, start=2):
-        visite_tot = 0
-        
-        # Conta FB
-        fbid = re.search(r"(?:videos/|reel/)(\d+)", r.get("Link_Facebook", ""))
-        if fbid:
-            try:
-                res = requests.get(f"https://graph.facebook.com/v18.0/{fbid.group(1)}?fields=views&access_token={FB_PAGE_TOKEN}").json()
-                visite_tot += int(res.get('views', 0))
-            except: pass
-
-        # Conta YT (se hai messo il link a mano o se esiste)
-        ytid = re.search(r"(?:v=|youtu\.be/)([^&]+)", r.get("Link_YouTube", ""))
-        if ytid:
-            try:
-                res = youtube.videos().list(part="statistics", id=ytid.group(1)).execute()
-                if res.get('items'):
-                    visite_tot += int(res['items'][0]['statistics'].get('viewCount', 0))
-            except: pass
-
-        if "Visualizzazioni" in col: 
-            aggiornamenti.append({'range': gspread.utils.rowcol_to_a1(i, col["Visualizzazioni"]+1), 'values': [[visite_tot]]})
-
-    if aggiornamenti:
-        sheet.batch_update(aggiornamenti)
-        print(f"✅ Statistiche aggiornate per {len(aggiornamenti)} righe.")
-
-    print("🎉 Il commercialista ha finito ed è andato a dormire.")
+            print("❌ Errore critico: Impossibile scaricare il video dal vecchio link.")
+    else:
+        print("ℹ️ Nessun vecchio post trovato da riciclare.")
 
 if __name__ == "__main__":
     main()
