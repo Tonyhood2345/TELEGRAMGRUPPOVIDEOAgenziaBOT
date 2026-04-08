@@ -39,8 +39,7 @@ def extract_fb_id(url):
 
 def main():
     gc, youtube = get_google_services()
-    sheet = gc.open_by_key(SHEET_ID).worksheet("DATABASE_IMMOBILI")
-    
+sheet = gc.open_by_key(SHEET_ID).worksheet("Foglio1")    
     raw = sheet.get_all_values()
     headers = [h.strip() for h in raw[0]]
     col = {n: headers.index(n) for n in headers if n}
