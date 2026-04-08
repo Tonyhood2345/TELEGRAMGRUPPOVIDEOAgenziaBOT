@@ -56,6 +56,9 @@ def main():
         print("❌ Errore: Assicurati che le colonne Visualizzazioni, Mi_Piace, Commenti, Condivisioni, Engagement esistano nel foglio.")
         return
 
+    # LISTA CHE CONTERRÀ TUTTE LE MODIFICHE DA FARE ALLA FINE
+    celle_da_aggiornare = []
+
     for index, r in enumerate(records):
         riga_foglio = index + 2  # Riga 1 è l'intestazione
         
@@ -66,7 +69,7 @@ def main():
         if not link_fb and not link_yt:
             continue
             
-        print(f"📊 Aggiornamento statistiche riga {riga_foglio}...")
+        print(f"📊 Calcolo statistiche riga {riga_foglio}...")
         
         tot_vis = 0
         tot_like = 0
@@ -109,17 +112,23 @@ def main():
         # Calcolo Engagement Totale (somma delle interazioni attive)
         tot_eng = tot_like + tot_comm + tot_cond
 
-        # --- AGGIORNAMENTO FOGLIO GOOGLE ---
-        # Aggiorniamo le singole celle per questa riga
+        # --- AGGIUNTA DEI DATI ALLA LISTA (Nessuna chiamata a Google per ora) ---
+        celle_da_aggiornare.append(gspread.Cell(riga_foglio, col_vis, tot_vis))
+        celle_da_aggiornare.append(gspread.Cell(riga_foglio, col_like, tot_like))
+        celle_da_aggiornare.append(gspread.Cell(riga_foglio, col_comm, tot_comm))
+        celle_da_aggiornare.append(gspread.Cell(riga_foglio, col_cond, tot_cond))
+        celle_da_aggiornare.append(gspread.Cell(riga_foglio, col_eng, tot_eng))
+
+    # --- AGGIORNAMENTO FOGLIO GOOGLE IN UN COLPO SOLO ---
+    if celle_da_aggiornare:
+        print(f"\n🚀 Invio di {len(celle_da_aggiornare)} celle a Google Sheets in un'unica operazione...")
         try:
-            sheet.update_cell(riga_foglio, col_vis, tot_vis)
-            sheet.update_cell(riga_foglio, col_like, tot_like)
-            sheet.update_cell(riga_foglio, col_comm, tot_comm)
-            sheet.update_cell(riga_foglio, col_cond, tot_cond)
-            sheet.update_cell(riga_foglio, col_eng, tot_eng)
-            print(f"  ✅ Dati salvati: {tot_vis} Vis | {tot_like} Like | {tot_comm} Comm | {tot_cond} Cond")
+            sheet.update_cells(celle_da_aggiornare)
+            print("✅ Tutti i dati sono stati salvati correttamente su Excel!")
         except Exception as e:
-            print(f"  ❌ Errore salvataggio su Google Sheets riga {riga_foglio}: {e}")
+            print(f"❌ Errore critico durante il salvataggio in blocco: {e}")
+    else:
+        print("\nℹ️ Nessun dato da aggiornare.")
 
 if __name__ == "__main__":
     print("🚀 Avvio bot aggiornamento statistiche...")
