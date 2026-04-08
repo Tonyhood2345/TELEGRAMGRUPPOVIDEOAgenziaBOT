@@ -49,7 +49,8 @@ def get_google_services():
 
 def main():
     gc, youtube = get_google_services()
-    sheet = gc.open_by_key(SHEET_ID).worksheet("DATABASE_IMMOBILI")
+    # Qui è dove ho corretto DATABASE_IMMOBILI con Foglio1
+    sheet = gc.open_by_key(SHEET_ID).worksheet("Foglio1")
     
     raw = sheet.get_all_values()
     
