@@ -1,58 +1,42 @@
 name: Bot Pubblicazione Immobiliare
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # Ti permette di avviare l'azione manualmente dal tab "Actions"
   schedule:
-    - cron: '40 10 * * *' # 11:40 in Italia
+    - cron: '0 8 * * *' # Esempio: si avvia in automatico ogni giorno alle 08:00 UTC (modificalo se serve)
 
 jobs:
-  esegui-bot:
+  run-bot:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout del codice
-        uses: actions/checkout@v3
+    - name: Checkout del codice
+      uses: actions/checkout@v3
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
 
-      # --- AGGIUNTA FONDAMENTALE PER I VIDEO ---
-      - name: Installa ffmpeg
-        run: sudo apt-get install -y ffmpeg
+    - name: Installazione pacchetti di sistema (FFmpeg)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg
 
-      # --- CONNESSIONE AL RASPBERRY TRAMITE TAILSCALE ---
-      - name: Connect to Tailscale
-        uses: tailscale/github-action@v2
-        with:
-          authkey: ${{ secrets.TS_AUTHKEY }}
+    - name: Installazione dipendenze Python
+      run: |
+        python -m pip install --upgrade pip
+        pip install yt-dlp requests gspread google-api-python-client google-auth-oauthlib
 
-      - name: Installa le librerie necessarie
-        run: |
-          python -m pip install --upgrade pip
-          # Aggiungiamo yt-dlp qui per il download dei video
-          pip install -r requirements.txt
-          pip install yt-dlp 
-
-      - name: Esegui il bot Python
-        env:
-          # Segreti Social & Google
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-          WP_PASSWORD: ${{ secrets.WP_PASSWORD }}
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
-          YT2_CLIENT_ID: ${{ secrets.YT2_CLIENT_ID }}
-          YT2_CLIENT_SECRET: ${{ secrets.YT2_CLIENT_SECRET }}
-          YT2_REFRESH_TOKEN: ${{ secrets.YT2_REFRESH_TOKEN }}
-          FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
-          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          
-          # Segreti WhatsApp (WAHA)
-          WAHA_URL: ${{ secrets.WAHA_URL }}
-          WAHA_API_KEY: ${{ secrets.WAHA_API_KEY }}
-          WHATSAPP_CHANNEL_ID: ${{ secrets.WHATSAPP_CHANNEL_ID }}
-          
-          # Se il tuo script si chiama bot_statistiche.py o bot.py, assicurati che coincida sotto
-        run: python bot.py
+    - name: Esecuzione dello script Python
+      env:
+        GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
+        FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
+        FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+        YT2_CLIENT_ID: ${{ secrets.YT2_CLIENT_ID }}
+        YT2_CLIENT_SECRET: ${{ secrets.YT2_CLIENT_SECRET }}
+        YT2_REFRESH_TOKEN: ${{ secrets.YT2_REFRESH_TOKEN }}
+        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        CHAT_ID: ${{ secrets.CHAT_ID }}
+      # Sostituisci "bot.py" con il nome esatto del tuo file Python se è diverso
+      run: python bot.py
