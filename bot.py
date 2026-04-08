@@ -30,11 +30,15 @@ def download_video_fb(url):
     output_filename = "video_riciclo.mp4"
     print(f"📥 Scaricamento video da: {url}")
     try:
-        comando = ['yt-dlp', '-f', 'b[ext=mp4]', url, '-o', output_filename, '--force-overwrites']
+        # Aggiunto il timeout di 60 secondi per evitare loop infiniti su GitHub Actions
+        comando = ['yt-dlp', '--socket-timeout', '60', '-f', 'b[ext=mp4]', url, '-o', output_filename, '--force-overwrites']
         subprocess.run(comando, check=True)
         return output_filename if os.path.exists(output_filename) else None
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Errore durante l'esecuzione di yt-dlp: {e}")
+        return None
     except Exception as e:
-        print(f"❌ Errore download: {e}")
+        print(f"❌ Errore generico nel download: {e}")
         return None
 
 def get_google_services():
@@ -98,19 +102,29 @@ def main():
             if r_fb.status_code == 200:
                 nuovo_link_fb = f"https://www.facebook.com/{FB_PAGE_ID}/videos/{r_fb.json().get('id')}"
                 print(f"✅ Facebook: {nuovo_link_fb}")
+            else:
+                print(f"❌ Errore Facebook: {r_fb.text}")
 
             # --- YOUTUBE ---
             titolo_yt = f"RIPROPOSTA: {post_da_riciclare.get('Tipologia_Immobile', 'Immobile')} a {post_da_riciclare.get('Citta', 'Favara')}"
             body_yt = {'snippet': {'title': titolo_yt, 'description': nuovo_testo}, 'status': {'privacyStatus': 'public'}}
-            res_yt = youtube.videos().insert(part='snippet,status', body=body_yt, media_body=MediaFileUpload(video_temp, resumable=True)).execute()
-            nuovo_link_yt = f"https://www.youtube.com/watch?v={res_yt['id']}"
-            print(f"✅ YouTube: {nuovo_link_yt}")
+            try:
+                res_yt = youtube.videos().insert(part='snippet,status', body=body_yt, media_body=MediaFileUpload(video_temp, resumable=True)).execute()
+                nuovo_link_yt = f"https://www.youtube.com/watch?v={res_yt['id']}"
+                print(f"✅ YouTube: {nuovo_link_yt}")
+            except Exception as e:
+                print(f"❌ Errore YouTube: {e}")
+                nuovo_link_yt = ""
 
             # --- TELEGRAM ---
             tg_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
             with open(video_temp, "rb") as f:
-                requests.post(tg_url, data={"chat_id": CHAT_ID, "caption": nuovo_testo[:1024], "parse_mode": "HTML"}, files={"video": f})
-            print(f"✅ Telegram inviato.")
+                r_tg = requests.post(tg_url, data={"chat_id": CHAT_ID, "caption": nuovo_testo[:1024], "parse_mode": "HTML"}, files={"video": f})
+            
+            if r_tg.status_code == 200:
+                print(f"✅ Telegram inviato.")
+            else:
+                print(f"❌ Errore Telegram: {r_tg.text}")
 
             # --- AGGIORNAMENTO EXCEL ---
             col_pubblicato_idx = headers.index("Pubblicato") + 1
@@ -133,7 +147,7 @@ def main():
             
             os.remove(video_temp)
         else:
-            print("❌ Errore critico: Impossibile scaricare il video.")
+            print("❌ Errore critico: Impossibile scaricare il video. Interruzione.")
     else:
         print("ℹ️ Nessun vecchio post trovato da riciclare.")
 
