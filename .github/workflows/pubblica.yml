@@ -1,9 +1,9 @@
 name: Bot Pubblicazione Immobiliare
 
 on:
-  workflow_dispatch: # Ti permette di avviare l'azione manualmente dal tab "Actions"
+  workflow_dispatch: 
   schedule:
-    - cron: '0 8 * * *' # Esempio: si avvia in automatico ogni giorno alle 08:00 UTC (modificalo se serve)
+    - cron: '0 8 * * *' 
 
 jobs:
   run-bot:
@@ -26,7 +26,9 @@ jobs:
     - name: Installazione dipendenze Python
       run: |
         python -m pip install --upgrade pip
-        pip install yt-dlp requests gspread google-api-python-client google-auth-oauthlib
+        # Forziamo l'aggiornamento immediato di yt-dlp all'ultima versione disponibile
+        pip install -U yt-dlp 
+        pip install requests gspread google-api-python-client google-auth-oauthlib
 
     - name: Esecuzione dello script Python
       env:
@@ -38,5 +40,5 @@ jobs:
         YT2_REFRESH_TOKEN: ${{ secrets.YT2_REFRESH_TOKEN }}
         TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         CHAT_ID: ${{ secrets.CHAT_ID }}
-      # Sostituisci "bot.py" con il nome esatto del tuo file Python se è diverso
+      # Assicurati che lo script si chiami bot.py, altrimenti correggi qui sotto
       run: python bot.py
