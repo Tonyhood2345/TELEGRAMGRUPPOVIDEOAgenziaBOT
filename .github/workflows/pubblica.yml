@@ -1,9 +1,9 @@
 name: Bot Pubblicazione Immobiliare
 
 on:
-  workflow_dispatch: 
+  workflow_dispatch: # Ti permette di avviare l'azione manualmente dal tab "Actions"
   schedule:
-    - cron: '0 8 * * *' 
+    - cron: '0 8 * * *' # Si avvia in automatico ogni giorno alle 08:00 UTC
 
 jobs:
   run-bot:
