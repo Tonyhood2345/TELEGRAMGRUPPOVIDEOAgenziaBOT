@@ -26,19 +26,19 @@ def modifica_testo_annuncio(testo_originale):
     intro = "🌟 UN GRANDE CLASSICO SEMPRE ATTUALE 🌟\n\n"
     return f"{intro}{testo_originale}\n\n#repost #immobiliaregiancani #favara"
 
-def download_video_fb(url):
+def download_video(url, sorgente="YouTube"):
     output_filename = "video_riciclo.mp4"
-    print(f"📥 Scaricamento video da: {url}")
+    print(f"📥 Scaricamento video da {sorgente}: {url}")
     try:
-        # Aggiunto il timeout di 60 secondi per evitare loop infiniti su GitHub Actions
+        # Timeout di 60 secondi per evitare blocchi infiniti
         comando = ['yt-dlp', '--socket-timeout', '60', '-f', 'b[ext=mp4]', url, '-o', output_filename, '--force-overwrites']
         subprocess.run(comando, check=True)
         return output_filename if os.path.exists(output_filename) else None
     except subprocess.CalledProcessError as e:
-        print(f"❌ Errore durante l'esecuzione di yt-dlp: {e}")
+        print(f"❌ Errore durante l'esecuzione di yt-dlp su {sorgente}: {e}")
         return None
     except Exception as e:
-        print(f"❌ Errore generico nel download: {e}")
+        print(f"❌ Errore generico nel download da {sorgente}: {e}")
         return None
 
 def get_google_services():
@@ -49,19 +49,16 @@ def get_google_services():
 
 def main():
     gc, youtube = get_google_services()
-    # Qui è dove ho corretto DATABASE_IMMOBILI con Foglio1
     sheet = gc.open_by_key(SHEET_ID).worksheet("Foglio1")
     
     raw = sheet.get_all_values()
     
-    # Pulizia estrema degli header per evitare problemi con spazi o a capo invisibili
+    # Pulizia degli header
     headers = [str(h).strip().replace('\n', '').replace('\r', '') for h in raw[0]]
     col = {n: headers.index(n) for n in headers if n}
     
-    # Creazione dei record allineati
     records = []
     for r in raw[1:]:
-        # Riempiamo le celle vuote se la riga è più corta degli header
         r_completa = r + [""] * (len(headers) - len(r))
         records.append(dict(zip(headers, r_completa)))
 
@@ -72,27 +69,39 @@ def main():
 
     for index, r in enumerate(records):
         link_fb = str(r.get("Link_Facebook", "")).strip()
+        link_yt = str(r.get("Link_YouTube", "")).strip()
         pubblicato = str(r.get("Pubblicato", "")).strip().upper()
         
-        # Stampa le prime 5 righe per capire cosa legge
         if index < 5:
-            print(f"🔍 [Riga {index+2}] -> FB: '{link_fb[:30]}...' | Pubblicato: '{pubblicato}' | Città: '{r.get('Citta', '')}'")
+            print(f"🔍 [Riga {index+2}] -> FB: '{link_fb[:20]}...' | YT: '{link_yt[:20]}...' | Pubblicato: '{pubblicato}'")
 
-        if link_fb and pubblicato == "SI":
+        # Cerchiamo un post che abbia "SI" e che abbia ALMENO uno dei due link compilati
+        if (link_fb or link_yt) and pubblicato == "SI":
             post_da_riciclare = r
             riga_foglio_originale = index + 2 
             print(f"🎯 TROVATO! Post da riciclare alla riga {riga_foglio_originale}")
             break 
 
     if post_da_riciclare:
-        url_fb_vecchio = post_da_riciclare.get("Link_Facebook")
+        url_fb_vecchio = post_da_riciclare.get("Link_Facebook", "").strip()
+        url_yt_vecchio = post_da_riciclare.get("Link_YouTube", "").strip()
         testo_vecchio = post_da_riciclare.get("Descrizione", "")
         
         nuovo_testo = modifica_testo_annuncio(testo_vecchio)
-        video_temp = download_video_fb(url_fb_vecchio)
+        video_temp = None
+
+        # --- LOGICA DI DOWNLOAD INTELLIGENTE ---
+        # Priorità 1: Prova a scaricare da YouTube se il link esiste
+        if url_yt_vecchio:
+            video_temp = download_video(url_yt_vecchio, sorgente="YouTube")
+        
+        # Priorità 2: Se YouTube ha fallito o non c'era il link, prova da Facebook
+        if not video_temp and url_fb_vecchio:
+            print("⚠️ YouTube non disponibile o fallito. Tento il download da Facebook...")
+            video_temp = download_video(url_fb_vecchio, sorgente="Facebook")
         
         if video_temp:
-            print(f"✅ Video pronto. Inizio ripubblicazione...")
+            print(f"✅ Video pronto ({video_temp}). Inizio ripubblicazione sui canali...")
 
             # --- FACEBOOK ---
             fb_url = f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}/videos"
@@ -102,7 +111,7 @@ def main():
             nuovo_link_fb = ""
             if r_fb.status_code == 200:
                 nuovo_link_fb = f"https://www.facebook.com/{FB_PAGE_ID}/videos/{r_fb.json().get('id')}"
-                print(f"✅ Facebook: {nuovo_link_fb}")
+                print(f"✅ Facebook pubblicato: {nuovo_link_fb}")
             else:
                 print(f"❌ Errore Facebook: {r_fb.text}")
 
@@ -112,7 +121,7 @@ def main():
             try:
                 res_yt = youtube.videos().insert(part='snippet,status', body=body_yt, media_body=MediaFileUpload(video_temp, resumable=True)).execute()
                 nuovo_link_yt = f"https://www.youtube.com/watch?v={res_yt['id']}"
-                print(f"✅ YouTube: {nuovo_link_yt}")
+                print(f"✅ YouTube pubblicato: {nuovo_link_yt}")
             except Exception as e:
                 print(f"❌ Errore YouTube: {e}")
                 nuovo_link_yt = ""
@@ -148,7 +157,7 @@ def main():
             
             os.remove(video_temp)
         else:
-            print("❌ Errore critico: Impossibile scaricare il video. Interruzione.")
+            print("❌ Errore critico: Impossibile scaricare il video sia da YouTube che da Facebook. Interruzione.")
     else:
         print("ℹ️ Nessun vecchio post trovato da riciclare.")
 
