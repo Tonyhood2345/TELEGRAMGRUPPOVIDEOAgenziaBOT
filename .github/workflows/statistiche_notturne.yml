@@ -20,8 +20,10 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: Installa ffmpeg (Necessario per gestire i video)
-      run: sudo apt-get install -y ffmpeg
+    - name: Aggiorna indici e Installa ffmpeg (Necessario per gestire i video)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --fix-missing ffmpeg
 
     - name: Installa le librerie
       run: |
