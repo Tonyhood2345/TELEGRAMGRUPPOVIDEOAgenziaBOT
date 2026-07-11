@@ -665,7 +665,18 @@ def ricicla_post():
     nuovo_link_fb = upload_facebook(video_temp, nuovo_testo)
     titolo_yt = f"RIPROPOSTA: {post_da_riciclare.get('Tipologia_Immobile', 'Immobile')} a {post_da_riciclare.get('Citta', 'Favara')}"
     nuovo_link_yt = upload_youtube(youtube, video_temp, titolo_yt, nuovo_testo)
-    send_telegram(video_temp, nuovo_testo, channel=False)
+    
+    # Costruiamo una descrizione arricchita con i link dei social per Telegram
+    testo_tg = nuovo_testo
+    link_social_tg = []
+    if nuovo_link_yt and nuovo_link_yt != "skip":
+        link_social_tg.append(f"📺 YouTube: {nuovo_link_yt}")
+    if nuovo_link_fb and nuovo_link_fb != "skip":
+        link_social_tg.append(f"📘 Facebook: {nuovo_link_fb}")
+    if link_social_tg:
+        testo_tg += "\n\n🔗 *Guarda anche su:* \n" + "\n".join(link_social_tg)
+        
+    send_telegram(video_temp, testo_tg, channel=False)
 
     col_pubblicato_idx = headers.index("Pubblicato") + 1
     sheet.update_cell(riga_foglio_originale, col_pubblicato_idx, "RICICLATO")
@@ -791,9 +802,28 @@ def pipeline_nuovo_immobile():
         )
 
     if not has_tg:
+        # Costruiamo una descrizione arricchita con i link dei social per Telegram
+        descrizione_tg = INPUT_SEO_DESCRIPTION or "Nuova opportunità immobiliare"
+        
+        link_social_tg = []
+        yt_link = risultati.get("youtube") or existing.get("yt") or existing.get("youtube")
+        if yt_link and yt_link != "skip":
+            link_social_tg.append(f"📺 YouTube: {yt_link}")
+            
+        fb_link = risultati.get("facebook") or existing.get("fb") or existing.get("facebook")
+        if fb_link and fb_link != "skip":
+            link_social_tg.append(f"📘 Facebook: {fb_link}")
+            
+        ig_link = risultati.get("instagram") or existing.get("ig") or existing.get("instagram")
+        if ig_link and ig_link != "skip":
+            link_social_tg.append(f"📸 Instagram: {ig_link}")
+            
+        if link_social_tg:
+            descrizione_tg += "\n\n🔗 *Guarda anche su:* \n" + "\n".join(link_social_tg)
+            
         tg_result = send_telegram(
             video_editato,
-            INPUT_SEO_DESCRIPTION or "Nuova opportunità immobiliare",
+            descrizione_tg,
             channel=True
         )
         risultati["telegram"] = tg_result
