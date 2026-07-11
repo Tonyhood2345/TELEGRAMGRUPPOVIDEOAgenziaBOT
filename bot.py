@@ -39,6 +39,13 @@ WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "")
 WHATSAPP_PHONE_ID = os.environ.get("WHATSAPP_PHONE_ID", "")
 BOSS_PHONE = os.environ.get("BOSS_PHONE", "")
 
+# Integrazioni aggiuntive: Sito (WordPress) e Google Business Profile (GMB)
+WP_URL = os.environ.get("WP_URL", "")
+WP_USER = os.environ.get("WP_USER", "")
+WP_PASSWORD = os.environ.get("WP_PASSWORD", "")
+GMB_ACCOUNT_ID = os.environ.get("GMB_ACCOUNT_ID", "")
+GMB_LOCATION_ID = os.environ.get("GMB_LOCATION_ID", "")
+
 # Input da workflow_dispatch (modalità NUOVO IMMOBILE)
 INPUT_JOB_ID = os.environ.get("INPUT_JOB_ID", "")
 INPUT_VIDEO_URL = os.environ.get("INPUT_VIDEO_URL", "")
@@ -51,6 +58,9 @@ INPUT_EXISTING_LINKS = os.environ.get("INPUT_EXISTING_LINKS", "{}")
 
 SHEET_ID = "19m1cStsqyCvzz3-AYFJKPnrLPNaDuCXEKM8Fka76-Hc"
 BRANDING = "\n\n✨ Antonio Giancani"
+
+# Variabile globale per trasferire l'URL CDN diretto del video da Facebook a Instagram
+LATEST_FB_VIDEO_DIRECT_URL = ""
 
 
 # ═══════════════════════════════════════════
@@ -143,6 +153,53 @@ def edit_video(input_file, durata=30):
 
 
 # ═══════════════════════════════════════════
+# FUNZIONI INTEGRATIVE FACEBOOK / INSTAGRAM
+# ═══════════════════════════════════════════
+
+def extract_facebook_video_id(url):
+    """Estrae l'ID numerico del video da una URL di Facebook (share, watch, ecc.)."""
+    if not url:
+        return ""
+    # Esempi: share/v/1ErTi5nk3o/ o watch/?v=8392109843729
+    match = re.search(r'(?:v|videos|watch|share/v|live/\?v)=?/?([a-zA-Z0-9]+)', url)
+    if match:
+        token = match.group(1)
+        if token.isdigit():
+            return token
+        # Fallback se è un token alfanumerico di share: cerchiamo se ci sono numeri lunghi
+        numbers = re.findall(r'\d+', url)
+        if numbers:
+            longest = max(numbers, key=len)
+            if len(longest) >= 8:
+                return longest
+        return token
+    return ""
+
+
+def get_facebook_video_direct_url(video_id):
+    """Interroga la Graph API di Facebook per ottenere il link CDN directo al file video MP4."""
+    if not video_id or not FB_PAGE_TOKEN:
+        return ""
+    try:
+        url = f"https://graph.facebook.com/v21.0/{video_id}"
+        params = {
+            'fields': 'source',
+            'access_token': FB_PAGE_TOKEN
+        }
+        r = requests.get(url, params=params, timeout=20)
+        if r.status_code == 200:
+            direct_url = r.json().get('source', '')
+            if direct_url:
+                print(f"🎬 URL video diretto Facebook trovato: {direct_url[:50]}...")
+                return direct_url
+        else:
+            print(f"⚠️ Errore Graph API recupero sorgente video {video_id}: {r.text[:150]}")
+    except Exception as e:
+        print(f"⚠️ Errore recupero direct link FB: {e}")
+    return ""
+
+
+# ═══════════════════════════════════════════
 # UPLOAD PER PIATTAFORMA
 # ═══════════════════════════════════════════
 
@@ -163,6 +220,11 @@ def upload_facebook(video_file, descrizione):
             video_id = r.json().get('id', '')
             link = f"https://www.facebook.com/{FB_PAGE_ID}/videos/{video_id}"
             print(f"✅ Facebook pubblicato: {link}")
+            
+            # Cerca e memorizza immediatamente la URL del file MP4 diretto per Instagram Reels
+            global LATEST_FB_VIDEO_DIRECT_URL
+            LATEST_FB_VIDEO_DIRECT_URL = get_facebook_video_direct_url(video_id)
+            
             return link
         else:
             print(f"❌ Errore Facebook ({r.status_code}): {r.text[:200]}")
@@ -212,13 +274,11 @@ def upload_instagram_reel(video_file, caption, fb_video_url=""):
     testo = caption + BRANDING
 
     # Instagram richiede un URL pubblico del video.
-    # Se abbiamo il link Facebook, usiamo quello; altrimenti saltiamo.
     video_url_for_ig = ""
     if fb_video_url:
         video_url_for_ig = fb_video_url
     else:
         print("⚠️ Instagram: serve un URL pubblico del video. Uso fallback upload diretto...")
-        # Fallback: provo a usare INPUT_VIDEO_URL se è un link pubblico
         if INPUT_VIDEO_URL and INPUT_VIDEO_URL.startswith("http"):
             video_url_for_ig = INPUT_VIDEO_URL
         else:
@@ -242,7 +302,7 @@ def upload_instagram_reel(video_file, caption, fb_video_url=""):
         container_id = r1.json().get('id')
         print(f"📦 IG Container creato: {container_id}")
 
-        # Step 2: Poll fino a che il container è pronto (max 60 tentativi, 5s ciascuno)
+        # Step 2: Poll
         status_url = f"https://graph.facebook.com/v21.0/{container_id}"
         for attempt in range(60):
             time.sleep(5)
@@ -288,14 +348,21 @@ def upload_instagram_reel(video_file, caption, fb_video_url=""):
 
 
 def send_telegram(video_file, caption, channel=True):
-    """Invia video su Telegram (canale o chat personale)."""
+    """Invia video su Telegram (canale o chat personale) con gestione errori di parsing HTML."""
     target = TELEGRAM_CHANNEL_ID if (channel and TELEGRAM_CHANNEL_ID) else CHAT_ID
     label = "Canale Telegram" if (channel and TELEGRAM_CHANNEL_ID) else "Telegram personale"
-    print(f"✈️ Invio {label}...")
+    print(f"✈️ Invio {label} (target: {target})...")
+
+    if not TELEGRAM_TOKEN or not target:
+        print(f"⚠️ {label}: credenziali o target mancanti, skip")
+        return ""
 
     testo = caption[:1024] + BRANDING if len(caption) < 1000 else caption[:990] + BRANDING
     try:
         tg_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
+        
+        # Tentativo 1: Invio con formattazione HTML
+        print(f"✈️ {label}: provo con parse_mode='HTML'...")
         with open(video_file, "rb") as f:
             r = requests.post(
                 tg_url,
@@ -303,14 +370,141 @@ def send_telegram(video_file, caption, channel=True):
                 files={"video": f},
                 timeout=120
             )
+        
         if r.status_code == 200:
-            print(f"✅ {label}: inviato!")
+            print(f"✅ {label}: inviato con successo!")
             return "ok"
         else:
-            print(f"❌ {label} errore ({r.status_code}): {r.text[:200]}")
+            # Se fallisce per errore di parsing HTML
+            print(f"⚠️ {label} primo tentativo fallito ({r.status_code}): {r.text[:150]}. Riprovo senza parse_mode...")
+            with open(video_file, "rb") as f:
+                r2 = requests.post(
+                    tg_url,
+                    data={"chat_id": target, "caption": testo},
+                    files={"video": f},
+                    timeout=120
+                )
+            if r2.status_code == 200:
+                print(f"✅ {label}: inviato con successo (testo semplice, secondo tentativo)!")
+                return "ok"
+            else:
+                print(f"❌ {label} definitivo fallito ({r2.status_code}): {r2.text[:150]}")
+                return ""
+    except Exception as e:
+        print(f"❌ Errore invio {label}: {e}")
+        return ""
+
+
+# ═══════════════════════════════════════════
+# INTEGRAZIONI AGGIUNTIVE: GOOGLE BUSINESS & SITO (WP)
+# ═══════════════════════════════════════════
+
+def get_google_access_token():
+    """Genera un access token di Google temporaneo usando il refresh token di YouTube."""
+    if not YT2_REFRESH_TOKEN or not YT2_CLIENT_ID or not YT2_CLIENT_SECRET:
+        return ""
+    try:
+        url = "https://oauth2.googleapis.com/token"
+        payload = {
+            'client_id': YT2_CLIENT_ID,
+            'client_secret': YT2_CLIENT_SECRET,
+            'refresh_token': YT2_REFRESH_TOKEN,
+            'grant_type': 'refresh_token'
+        }
+        r = requests.post(url, data=payload, timeout=20)
+        if r.status_code == 200:
+            return r.json().get('access_token', '')
+    except Exception as e:
+        print(f"⚠️ Errore recupero access token Google: {e}")
+    return ""
+
+
+def upload_google_business(summary, action_url=None):
+    """Pubblica un post con novità ed eventuale link su Google Business Profile."""
+    print("🏢 Pubblicazione su Google Business Profile...")
+    if not GMB_ACCOUNT_ID or not GMB_LOCATION_ID:
+        print("⚠️ GMB: credenziali GMB_ACCOUNT_ID o GMB_LOCATION_ID mancanti, skip")
+        return "skip"
+
+    access_token = get_google_access_token()
+    if not access_token:
+        print("⚠️ GMB: impossibile generare l'access token Google, skip")
+        return ""
+
+    url = f"https://mybusiness.googleapis.com/v4/accounts/{GMB_ACCOUNT_ID}/locations/{GMB_LOCATION_ID}/localPosts"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json"
+    }
+
+    testo_post = (summary + BRANDING)[:1500]
+
+    payload = {
+        "languageCode": "it",
+        "summary": testo_post,
+        "topicType": "STANDARD"
+    }
+
+    if action_url:
+        payload["callToAction"] = {
+            "actionType": "LEARN_MORE",
+            "url": action_url
+        }
+
+    try:
+        r = requests.post(url, headers=headers, json=payload, timeout=30)
+        if r.status_code in (200, 201):
+            post_name = r.json().get("name", "")
+            print(f"✅ Google Business pubblicato con successo: {post_name}")
+            return "ok"
+        else:
+            print(f"❌ GMB errore ({r.status_code}): {r.text[:200]}")
             return ""
     except Exception as e:
-        print(f"❌ Errore {label}: {e}")
+        print(f"❌ Errore GMB: {e}")
+        return ""
+
+
+def upload_wordpress(title, description, video_url=None):
+    """Pubblica l'annuncio sul sito internet WordPress tramite REST API."""
+    print("🌐 Pubblicazione sul sito WordPress...")
+    if not WP_URL or not WP_USER or not WP_PASSWORD:
+        print("⚠️ WordPress: credenziali o URL mancanti (WP_URL, WP_USER, WP_PASSWORD), skip")
+        return "skip"
+
+    base_url = WP_URL.strip()
+    if not base_url.endswith("/"):
+        base_url += "/"
+    endpoint = f"{base_url}wp-json/wp/v2/posts"
+
+    content_html = f"<p>{description.replace(chr(10), '<br>')}</p>"
+    if video_url:
+        content_html += f"<br><br><div class='wp-block-embed is-type-video'><a href='{video_url}'>Guarda il video dell'immobile</a></div>"
+    content_html += f"<p><strong>✨ Antonio Giancani</strong></p>"
+
+    payload = {
+        "title": title,
+        "content": content_html,
+        "status": "publish"
+    }
+
+    try:
+        from requests.auth import HTTPBasicAuth
+        r = requests.post(
+            endpoint,
+            auth=HTTPBasicAuth(WP_USER, WP_PASSWORD),
+            json=payload,
+            timeout=30
+        )
+        if r.status_code in (200, 201):
+            post_link = r.json().get("link", "")
+            print(f"✅ WordPress pubblicato con successo: {post_link}")
+            return post_link
+        else:
+            print(f"❌ WordPress errore ({r.status_code}): {r.text[:200]}")
+            return ""
+    except Exception as e:
+        print(f"❌ Errore WordPress: {e}")
         return ""
 
 
@@ -339,6 +533,8 @@ def send_whatsapp_report(risultati, indirizzo):
         badge("facebook", "Facebook", "📘"),
         badge("instagram", "Instagram", "📸"),
         badge("telegram", "Telegram", "✈️"),
+        badge("wordpress", "Sito Web", "🌐"),
+        badge("gmb", "Google Business", "🏢"),
         "",
         f"📍 *Indirizzo:* {indirizzo or 'N/D'}",
         f"📅 *Data:* {datetime.now().strftime('%d/%m/%Y %H:%M')}",
@@ -444,7 +640,6 @@ def ricicla_post():
     nuovo_testo = modifica_testo_annuncio(testo_vecchio)
     video_temp = None
 
-    # Download: priorità YouTube > Facebook
     if url_yt_vecchio:
         video_temp = download_video(url_yt_vecchio, sorgente="YouTube")
     if not video_temp and url_fb_vecchio:
@@ -457,17 +652,11 @@ def ricicla_post():
 
     print(f"✅ Video pronto ({video_temp}). Inizio ripubblicazione...")
 
-    # Facebook
     nuovo_link_fb = upload_facebook(video_temp, nuovo_testo)
-
-    # YouTube
     titolo_yt = f"RIPROPOSTA: {post_da_riciclare.get('Tipologia_Immobile', 'Immobile')} a {post_da_riciclare.get('Citta', 'Favara')}"
     nuovo_link_yt = upload_youtube(youtube, video_temp, titolo_yt, nuovo_testo)
-
-    # Telegram (chat personale, come l'originale)
     send_telegram(video_temp, nuovo_testo, channel=False)
 
-    # Aggiornamento foglio
     col_pubblicato_idx = headers.index("Pubblicato") + 1
     sheet.update_cell(riga_foglio_originale, col_pubblicato_idx, "RICICLATO")
     print(f"🔄 Riga {riga_foglio_originale} impostata a 'RICICLATO'.")
@@ -503,7 +692,6 @@ def pipeline_nuovo_immobile():
     print(f"   Indirizzo: {INPUT_INDIRIZZO}")
     print("=" * 50)
 
-    # Parse link già esistenti per skip duplicati
     try:
         existing = json.loads(INPUT_EXISTING_LINKS) if INPUT_EXISTING_LINKS else {}
     except json.JSONDecodeError:
@@ -513,26 +701,28 @@ def pipeline_nuovo_immobile():
     has_fb = bool(existing.get("fb", "").strip() or existing.get("facebook", "").strip())
     has_ig = bool(existing.get("ig", "").strip() or existing.get("instagram", "").strip())
     has_tg = bool(existing.get("tg", "").strip() or existing.get("telegram", "").strip())
+    has_wp = bool(existing.get("wp", "").strip() or existing.get("wordpress", "").strip() or existing.get("website", "").strip())
+    has_gmb = bool(existing.get("gmb", "").strip() or existing.get("google_business", "").strip() or existing.get("google_business_profile", "").strip())
 
-    print(f"📋 Link esistenti: YT={'⏭️' if has_yt else '📤'} | FB={'⏭️' if has_fb else '📤'} | IG={'⏭️' if has_ig else '📤'} | TG={'⏭️' if has_tg else '📤'}")
+    print(f"📋 Link esistenti: YT={'⏭️' if has_yt else '📤'} | FB={'⏭️' if has_fb else '📤'} | IG={'⏭️' if has_ig else '📤'} | TG={'⏭️' if has_tg else '📤'} | WP={'⏭️' if has_wp else '📤'} | GMB={'⏭️' if has_gmb else '📤'}")
 
-    # Inizializza servizi Google
     _, youtube = get_google_services()
 
-    # Risultati
     risultati = {
         "job_id": INPUT_JOB_ID,
         "status": "ok",
         "youtube": "skip" if has_yt else "",
         "facebook": "skip" if has_fb else "",
         "instagram": "skip" if has_ig else "",
-        "telegram": "skip" if has_tg else ""
+        "telegram": "skip" if has_tg else "",
+        "wordpress": "skip" if has_wp else "",
+        "gmb": "skip" if has_gmb else "",
+        "indirizzo": INPUT_INDIRIZZO,
+        "seo_description": INPUT_SEO_DESCRIPTION
     }
 
-    # Determina URL video sorgente per download
     video_url = INPUT_VIDEO_URL
     if not video_url:
-        # Prova dai link esistenti
         for key in ["yt", "youtube", "fb", "facebook", "ig", "instagram"]:
             url = existing.get(key, "").strip()
             if url:
@@ -547,7 +737,6 @@ def pipeline_nuovo_immobile():
         callback_daria(INPUT_CALLBACK_URL, risultati)
         return
 
-    # Step 1: Download video
     video_file = download_video(video_url, sorgente="Social")
     if not video_file:
         print("❌ Download video fallito!")
@@ -557,14 +746,11 @@ def pipeline_nuovo_immobile():
         callback_daria(INPUT_CALLBACK_URL, risultati)
         return
 
-    # Step 2: Edit video (trim 30s + watermark)
     video_editato = edit_video(video_file, durata=30)
 
-    # Step 3: Facebook (se non già presente)
     if not has_fb:
         risultati["facebook"] = upload_facebook(video_editato, INPUT_SEO_DESCRIPTION)
 
-    # Step 4: YouTube Short (se non già presente)
     if not has_yt:
         risultati["youtube"] = upload_youtube(
             youtube, video_editato,
@@ -572,21 +758,27 @@ def pipeline_nuovo_immobile():
             INPUT_SEO_DESCRIPTION or "Scopri questa opportunità immobiliare"
         )
 
-    # Step 5: Instagram Reel (se non già presente)
     if not has_ig:
-        # Per IG serve un URL pubblico: usiamo il link FB se appena pubblicato
         fb_url_for_ig = ""
+        global LATEST_FB_VIDEO_DIRECT_URL
+        
         if risultati["facebook"] and risultati["facebook"] not in ("", "skip"):
-            fb_url_for_ig = risultati["facebook"]
+            fb_url_for_ig = LATEST_FB_VIDEO_DIRECT_URL
         elif has_fb:
-            fb_url_for_ig = existing.get("fb", "") or existing.get("facebook", "")
+            existing_fb_url = existing.get("fb", "") or existing.get("facebook", "")
+            video_id = extract_facebook_video_id(existing_fb_url)
+            if video_id:
+                fb_url_for_ig = get_facebook_video_direct_url(video_id)
+
+        if not fb_url_for_ig and INPUT_VIDEO_URL and INPUT_VIDEO_URL.startswith("http"):
+            fb_url_for_ig = INPUT_VIDEO_URL
+
         risultati["instagram"] = upload_instagram_reel(
             video_editato,
             INPUT_SEO_DESCRIPTION or "Nuova opportunità immobiliare",
             fb_video_url=fb_url_for_ig
         )
 
-    # Step 6: Telegram (se non già inviato)
     if not has_tg:
         tg_result = send_telegram(
             video_editato,
@@ -595,13 +787,30 @@ def pipeline_nuovo_immobile():
         )
         risultati["telegram"] = tg_result
 
-    # Step 7: Report WhatsApp al Boss
-    send_whatsapp_report(risultati, INPUT_INDIRIZZO)
+    if not has_wp:
+        post_video_link = risultati.get("youtube") or risultati.get("facebook") or video_url
+        if post_video_link == "skip":
+            post_video_link = existing.get("youtube") or existing.get("facebook") or video_url
+        
+        risultati["wordpress"] = upload_wordpress(
+            title=INPUT_SEO_TITLE or f"Nuova Proposta Immobiliare a {INPUT_INDIRIZZO}",
+            description=INPUT_SEO_DESCRIPTION or "Scopri tutti i dettagli di questo immobile.",
+            video_url=post_video_link
+        )
 
-    # Step 8: Callback a DarIA
+    if not has_gmb:
+        gmb_cta_link = risultati.get("youtube") or risultati.get("facebook") or video_url
+        if gmb_cta_link == "skip":
+            gmb_cta_link = existing.get("youtube") or existing.get("facebook") or video_url
+            
+        risultati["gmb"] = upload_google_business(
+            summary=INPUT_SEO_DESCRIPTION or "Nuova proposta in agenzia.",
+            action_url=gmb_cta_link
+        )
+
+    send_whatsapp_report(risultati, INPUT_INDIRIZZO)
     callback_daria(INPUT_CALLBACK_URL, risultati)
 
-    # Pulizia
     for f in ["video_scaricato.mp4", "video_editato.mp4"]:
         if os.path.exists(f):
             os.remove(f)
@@ -612,23 +821,19 @@ def pipeline_nuovo_immobile():
     print(f"   Facebook:  {risultati['facebook'][:60] if risultati['facebook'] else 'N/A'}")
     print(f"   Instagram: {risultati['instagram'][:60] if risultati['instagram'] else 'N/A'}")
     print(f"   Telegram:  {risultati['telegram']}")
+    print(f"   WordPress: {risultati['wordpress'][:60] if risultati['wordpress'] else 'N/A'}")
+    print(f"   Google BP: {risultati['gmb']}")
     print("=" * 50)
     print("\n✨ Antonio Giancani")
 
-
-# ═══════════════════════════════════════════
-# MAIN — Selezione modalità
-# ═══════════════════════════════════════════
 
 def main():
     print("🤖 Bot Pubblicazione Immobiliare — Avvio")
     print(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     if INPUT_VIDEO_URL or INPUT_JOB_ID:
-        # MODALITÀ NUOVO IMMOBILE — attivata da workflow_dispatch con parametri
         pipeline_nuovo_immobile()
     else:
-        # MODALITÀ RICICLO — attivata dal cron giornaliero
         ricicla_post()
 
     print("\n✨ Antonio Giancani")
