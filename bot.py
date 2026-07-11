@@ -827,7 +827,224 @@ def pipeline_nuovo_immobile():
     print("\n✨ Antonio Giancani")
 
 
+
+def aggiorna_catalogo_ia_wordpress():
+    """Genera e aggiorna la pagina 'catalogo-immobili-ia' su WordPress leggendo da Piano_Editoriale_2026."""
+    print("🤖 Sincronizzazione Catalogo IA WordPress...")
+    if not WP_URL or not WP_USER or not WP_PASSWORD:
+        print("⚠️ WordPress: credenziali o URL mancanti, skip aggiornamento catalogo IA")
+        return
+        
+    try:
+        gc, _ = get_google_services()
+        # Fallback se non riusciamo ad aprire il foglio
+        try:
+            sh = gc.open_by_key("1s68pw0WEUcV0ZqltiahAqCp_r5rsycSjxKNh0VZQq_g")
+        except Exception:
+            sh = gc.open_by_key(SHEET_ID)
+            
+        try:
+            ws = sh.worksheet("Piano_Editoriale_2026")
+        except Exception:
+            try:
+                ws = sh.worksheet("ANNUNCI_ATTIVI")
+            except Exception:
+                print("⚠️ Impossibile trovare la scheda Piano_Editoriale_2026 o ANNUNCI_ATTIVI")
+                return
+                
+        all_values = ws.get_all_values()
+        if not all_values or len(all_values) <= 1:
+            print("⚠️ Nessun dato presente nel foglio")
+            return
+            
+        headers = [h.strip().upper() for h in all_values[0]]
+        
+        def get_col_idx(names, default):
+            for name in names:
+                if name.upper() in headers:
+                    return headers.index(name.upper())
+            return default
+            
+        idx_testo = get_col_idx(["TESTO", "TESTO_SEO", "DESCRIZIONE"], 2)
+        idx_tipo = get_col_idx(["TIPO", "TIPOLOGIA"], 3)
+        idx_link = get_col_idx(["LINK", "LINK_VIDEO", "LINK_YOUTUBE"], 4)
+        idx_stato = get_col_idx(["STATO"], 5)
+        idx_data = get_col_idx(["DATA", "DATA_PUBBLICAZIONE"], 1)
+        idx_id = get_col_idx(["ID", "ID_ANNUNCIO", "ID_IMMOBILE"], 0)
+        
+        annunci_attivi = []
+        for r_idx, r in enumerate(all_values[1:], start=2):
+            r_len = len(r)
+            stato = r[idx_stato].strip().upper() if idx_stato < r_len else ""
+            testo = r[idx_testo].strip() if idx_testo < r_len else ""
+            
+            if testo and stato in ("SI", "ATTIVO", "DISPONIBILE", "PUBBLICATO"):
+                tipo = r[idx_tipo].strip() if idx_tipo < r_len else "Immobile"
+                link = r[idx_link].strip() if idx_link < r_len else ""
+                data = r[idx_data].strip() if idx_data < r_len else ""
+                ann_id = r[idx_id].strip() if idx_id < r_len else f"ANN-{r_idx}"
+                
+                zona = "Favara"
+                citta_match = re.search(r'\b(favara|aragona|agrigento|porto empedocle|canicatt\u00ec|licata)\b', testo.lower())
+                if citta_match:
+                    zona = citta_match.group(1).capitalize()
+                
+                annunci_attivi.append({
+                    "id": ann_id,
+                    "data": data,
+                    "testo": testo,
+                    "tipo": tipo.capitalize(),
+                    "link": link,
+                    "zona": zona
+                })
+                
+        print(f"📊 Trovati {len(annunci_attivi)} annunci attivi per il catalogo IA.")
+        if not annunci_attivi:
+            print("⚠️ Nessun annuncio attivo da pubblicare, skip")
+            return
+            
+        html_content = (
+            "<p>Benvenuto nel catalogo degli immobili attivi gestiti direttamente da <strong>Antonio Giancani</strong>. "
+            "Questa pagina raccoglie l'elenco aggiornato in tempo reale delle propriet\u00e0 immobiliari disponibili a Favara, Aragona, Agrigento e dintorni. "
+            "Le informazioni in questa pagina sono strutturate per essere facilmente leggibili dai motori di ricerca e assistenti IA.</p>"
+            "<hr style='margin: 30px 0;'>"
+            "<div class='ia-listings-container'>"
+        )
+        
+        json_ld_list = []
+        
+        for idx, ann in enumerate(annunci_attivi):
+            prezzo = "Su Richiesta"
+            prezzo_val = ""
+            prezzo_match = re.search(r'(?:\u20ac\s*|euro\s*|a partire da\s*)?(\d{2,3}(?:\.\d{3})+|\d{4,6})(?:\s*(?:\u20ac|euro|k))?', ann["testo"].lower())
+            if prezzo_match:
+                prezzo_str = prezzo_match.group(1).replace(".", "")
+                prezzo_val = prezzo_str
+                prezzo = f"\u20ac {int(prezzo_str):,}".replace(",", ".")
+            
+            desc_cleaned = ann["testo"].replace('"', '\\"').replace('\n', ' ').replace('\r', '')
+            if len(desc_cleaned) > 250:
+                desc_cleaned = desc_cleaned[:250] + "..."
+                
+            html_content += f"""
+            <div class="ia-listing-item" style="border: 1px solid #e2e8f0; padding: 20px; margin-bottom: 25px; border-radius: 8px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                <h3 style="margin-top: 0; color: #1e293b;">{ann["tipo"]} in Vendita a {ann["zona"]}</h3>
+                <p style="margin: 5px 0;"><strong>Data di pubblicazione:</strong> {ann["data"]}</p>
+                <p style="margin: 5px 0;"><strong>Prezzo:</strong> <span style="font-size: 1.1em; color: #0f766e; font-weight: bold;">{prezzo}</span></p>
+                <p style="margin: 10px 0; color: #475569;">{ann["testo"].replace(chr(10), '<br>')}</p>
+            """
+            if ann["link"]:
+                html_content += f'<p style="margin: 10px 0;">\ud83c\udfa5 <strong>Video Presentazione:</strong> <a href="{ann["link"]}" target="_blank" rel="noopener">Guarda il video dell\'immobile</a></p>'
+                
+            html_content += f"""
+                <p style="margin: 15px 0 0 0; padding-top: 10px; border-top: 1px dashed #e2e8f0;">
+                    \ud83d\udcde <strong>Contatto Referente:</strong> Per informazioni e appuntamenti contattare <strong>Antonio Giancani</strong> al numero <a href="tel:+393201667156">+39 320 166 7156</a>.
+                </p>
+            </div>
+            """
+            
+            item_schema = {
+                "@type": "ListItem",
+                "position": idx + 1,
+                "item": {
+                    "@type": "RealEstateListing",
+                    "@id": f"https://www.immobiliaregiancani.it/#listing-{ann['id']}",
+                    "name": f"{ann['tipo']} in Vendita a {ann['zona']}",
+                    "description": desc_cleaned,
+                    "datePosted": ann["data"],
+                    "url": ann["link"] or "https://www.immobiliaregiancani.it/",
+                    "offers": {
+                        "@type": "Offer",
+                        "priceCurrency": "EUR",
+                        "price": prezzo_val or "0",
+                        "seller": {
+                            "@type": "RealEstateAgent",
+                            "name": "Antonio Giancani",
+                            "telephone": "+393201667156",
+                            "url": "https://www.immobiliaregiancani.it/"
+                        }
+                    }
+                }
+            }
+            json_ld_list.append(item_schema)
+            
+        html_content += "</div>"
+        
+        schema_graph = {
+            "@context": "https://schema.org",
+            "@graph": [
+                {
+                    "@type": "RealEstateAgent",
+                    "@id": "https://www.immobiliaregiancani.it/#agent",
+                    "name": "Antonio Giancani",
+                    "telephone": "+393201667156",
+                    "url": "https://www.immobiliaregiancani.it/",
+                    "image": "https://www.immobiliaregiancani.it/wp-content/uploads/logo.png",
+                    "address": {
+                        "@type": "PostalAddress",
+                        "addressLocality": "Favara",
+                        "addressRegion": "AG",
+                        "postalCode": "92018",
+                        "addressCountry": "IT"
+                    }
+                },
+                {
+                    "@type": "ItemList",
+                    "name": "Catalogo Immobili Attivi - Antonio Giancani",
+                    "numberOfItems": len(annunci_attivi),
+                    "itemListElement": json_ld_list
+                }
+            ]
+        }
+        
+        json_ld_script = f"\n\n<script type='application/ld+json'>\n{json.dumps(schema_graph, indent=2)}\n</script>"
+        full_page_html = html_content + json_ld_script
+        
+        base_url = WP_URL.strip()
+        if not base_url.endswith("/"):
+            base_url += "/"
+            
+        search_endpoint = f"{base_url}wp-json/wp/v2/pages?slug=catalogo-immobili-ia"
+        from requests.auth import HTTPBasicAuth
+        auth = HTTPBasicAuth(WP_USER, WP_PASSWORD)
+        
+        r = requests.get(search_endpoint, auth=auth, timeout=20)
+        page_id = None
+        if r.status_code == 200:
+            pages = r.json()
+            if pages and len(pages) > 0:
+                page_id = pages[0].get("id")
+                
+        payload = {
+            "title": "Catalogo Immobili Attivi per Motori di Ricerca IA",
+            "content": full_page_html,
+            "status": "publish"
+        }
+        
+        if page_id:
+            print(f"\u2194 Pagina esistente trovata (ID: {page_id}). Aggiornamento...")
+            update_endpoint = f"{base_url}wp-json/wp/v2/pages/{page_id}"
+            r_up = requests.post(update_endpoint, auth=auth, json=payload, timeout=30)
+            if r_up.status_code in (200, 201):
+                print(f"\u2705 Catalogo IA aggiornato con successo: {r_up.json().get('link')}")
+            else:
+                print(f"\u274c Errore aggiornamento catalogo ({r_up.status_code}): {r_up.text[:200]}")
+        else:
+            print("\ud83c\udd96 Pagina non trovata. Creazione in corso...")
+            payload["slug"] = "catalogo-immobili-ia"
+            create_endpoint = f"{base_url}wp-json/wp/v2/pages"
+            r_cr = requests.post(create_endpoint, auth=auth, json=payload, timeout=30)
+            if r_cr.status_code in (200, 201):
+                print(f"\u2705 Catalogo IA creato con successo: {r_cr.json().get('link')}")
+            else:
+                print(f"\u274c Errore creazione catalogo ({r_cr.status_code}): {r_cr.text[:200]}")
+                
+    except Exception as e:
+        print(f"\u274c Eccezione durante la sincronizzazione del catalogo IA: {e}")
+
+
 def main():
+
     print("🤖 Bot Pubblicazione Immobiliare — Avvio")
     print(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
@@ -836,9 +1053,11 @@ def main():
     else:
         ricicla_post()
 
+    # Sincronizza sempre il catalogo WordPress per l'ottimizzazione IA al termine
+    aggiorna_catalogo_ia_wordpress()
+
     print("\n✨ Antonio Giancani")
 
 
 if __name__ == "__main__":
     main()
- 
