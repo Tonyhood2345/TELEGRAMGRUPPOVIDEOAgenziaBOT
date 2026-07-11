@@ -76,6 +76,11 @@ jobs:
           WHATSAPP_TOKEN: ${{ secrets.WHATSAPP_TOKEN }}
           WHATSAPP_PHONE_ID: ${{ secrets.WHATSAPP_PHONE_ID }}
           BOSS_PHONE: ${{ secrets.BOSS_PHONE }}
+          WP_URL: ${{ secrets.WP_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_PASSWORD: ${{ secrets.WP_PASSWORD }}
+          GMB_ACCOUNT_ID: ${{ secrets.GMB_ACCOUNT_ID }}
+          GMB_LOCATION_ID: ${{ secrets.GMB_LOCATION_ID }}
           INPUT_JOB_ID: ${{ github.event.inputs.job_id }}
           INPUT_VIDEO_URL: ${{ github.event.inputs.video_url }}
           INPUT_SEO_TITLE: ${{ github.event.inputs.seo_title }}
