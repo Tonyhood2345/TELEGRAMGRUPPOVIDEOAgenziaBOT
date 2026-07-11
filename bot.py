@@ -635,7 +635,17 @@ def ricicla_post():
 
     url_fb_vecchio = post_da_riciclare.get("Link_Facebook", "").strip()
     url_yt_vecchio = post_da_riciclare.get("Link_YouTube", "").strip()
-    testo_vecchio = post_da_riciclare.get("Descrizione", "")
+    
+    # Regola di estrazione dati: i testi devono essere prelevati rigorosamente dalla Colonna F (Indice 5)
+    testo_vecchio = ""
+    try:
+        riga_raw = raw[riga_foglio_originale - 1]
+        if len(riga_raw) > 5:
+            testo_vecchio = str(riga_raw[5]).strip()
+    except Exception:
+        pass
+    if not testo_vecchio:
+        testo_vecchio = post_da_riciclare.get("Descrizione", "")
 
     nuovo_testo = modifica_testo_annuncio(testo_vecchio)
     video_temp = None
@@ -721,25 +731,26 @@ def pipeline_nuovo_immobile():
         "seo_description": INPUT_SEO_DESCRIPTION
     }
 
-    video_url = INPUT_VIDEO_URL
-    if not video_url:
-        for key in ["yt", "youtube", "fb", "facebook", "ig", "instagram"]:
-            url = existing.get(key, "").strip()
-            if url:
-                video_url = url
-                break
+    # Raccoglie tutti i link disponibili in ordine di preferenza per tentativi multipli di download
+    possibili_url = []
+    if INPUT_VIDEO_URL:
+        possibili_url.append((INPUT_VIDEO_URL, "Input Video"))
+    for key in ["yt", "youtube", "fb", "facebook", "ig", "instagram"]:
+        url = existing.get(key, "").strip()
+        if url and url not in [u[0] for u in possibili_url]:
+            possibili_url.append((url, key.upper()))
 
-    if not video_url:
-        print("❌ Nessun URL video disponibile!")
-        risultati["status"] = "error"
-        risultati["error"] = "Nessun URL video"
-        send_whatsapp_report(risultati, INPUT_INDIRIZZO)
-        callback_daria(INPUT_CALLBACK_URL, risultati)
-        return
+    video_file = None
+    for url, sorgente in possibili_url:
+        video_file = download_video(url, sorgente=sorgente)
+        if video_file:
+            print(f"✅ Download video completato con successo da {sorgente}!")
+            break
+        else:
+            print(f"⚠️ Tentativo fallito da {sorgente}, provo il prossimo...")
 
-    video_file = download_video(video_url, sorgente="Social")
     if not video_file:
-        print("❌ Download video fallito!")
+        print("❌ Tutti i tentativi di download del video sono falliti!")
         risultati["status"] = "error"
         risultati["error"] = "Download fallito"
         send_whatsapp_report(risultati, INPUT_INDIRIZZO)
@@ -865,10 +876,11 @@ def aggiorna_catalogo_ia_wordpress():
                     return headers.index(name.upper())
             return default
             
-        idx_testo = get_col_idx(["TESTO", "TESTO_SEO", "DESCRIZIONE"], 2)
+        # Regola di estrazione dati: il testo descrittivo dell'immobile viene prelevato rigorosamente dalla Colonna F (Indice 5)
+        idx_testo = 5
         idx_tipo = get_col_idx(["TIPO", "TIPOLOGIA"], 3)
         idx_link = get_col_idx(["LINK", "LINK_VIDEO", "LINK_YOUTUBE"], 4)
-        idx_stato = get_col_idx(["STATO"], 5)
+        idx_stato = get_col_idx(["STATO"], 2)
         idx_data = get_col_idx(["DATA", "DATA_PUBBLICAZIONE"], 1)
         idx_id = get_col_idx(["ID", "ID_ANNUNCIO", "ID_IMMOBILE"], 0)
         
@@ -1061,4 +1073,3 @@ def main():
 
 if __name__ == "__main__":
     main()
- 
