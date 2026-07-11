@@ -347,6 +347,92 @@ def upload_instagram_reel(video_file, caption, fb_video_url=""):
         return ""
 
 
+def upload_threads(video_file, caption, fb_video_url=""):
+    """Upload Threads Post via Threads API (similar to IG Reels)."""
+    print("🧵 Upload Threads...")
+    threads_token = os.environ.get("THREADS_ACCESS_TOKEN")
+    threads_user_id = os.environ.get("THREADS_USER_ID")
+    
+    if not threads_token or not threads_user_id:
+        print("⚠️ Threads: credenziali mancanti (THREADS_ACCESS_TOKEN o THREADS_USER_ID), skip")
+        return "skip"
+
+    testo = caption + BRANDING
+
+    # Richiede URL pubblico del video
+    video_url_for_threads = ""
+    if fb_video_url:
+        video_url_for_threads = fb_video_url
+    else:
+        print("⚠️ Threads: serve un URL pubblico del video. Uso fallback...")
+        if INPUT_VIDEO_URL and INPUT_VIDEO_URL.startswith("http"):
+            video_url_for_threads = INPUT_VIDEO_URL
+        else:
+            print("❌ Threads: nessun URL pubblico disponibile, skip")
+            return ""
+
+    try:
+        # Step 1: Crea container
+        create_url = f"https://graph.threads.net/v1.0/{threads_user_id}/threads"
+        create_data = {
+            'media_type': 'VIDEO',
+            'video_url': video_url_for_threads,
+            'text': testo[:500], # Threads ha un limite di caratteri di 500
+            'access_token': threads_token
+        }
+        r1 = requests.post(create_url, data=create_data, timeout=60)
+        if r1.status_code != 200:
+            print(f"❌ Threads container error ({r1.status_code}): {r1.text[:200]}")
+            return ""
+
+        container_id = r1.json().get('id')
+        print(f"📦 Threads Container creato: {container_id}")
+
+        # Step 2: Poll status
+        status_url = f"https://graph.threads.net/v1.0/{container_id}"
+        for attempt in range(60):
+            time.sleep(5)
+            r_status = requests.get(
+                status_url,
+                params={'fields': 'status_code', 'access_token': threads_token},
+                timeout=30
+            )
+            if r_status.status_code == 200:
+                status = r_status.json().get('status_code', '')
+                if status == 'FINISHED':
+                    print(f"✅ Threads Container pronto (tentativo {attempt + 1})")
+                    break
+                elif status == 'ERROR':
+                    print(f"❌ Threads Container in errore")
+                    return ""
+                else:
+                    if attempt % 6 == 0:
+                        print(f"⏳ Threads Container status: {status} (tentativo {attempt + 1})")
+        else:
+            print("❌ Threads Container timeout dopo 5 minuti")
+            return ""
+
+        # Step 3: Pubblica
+        publish_url = f"https://graph.threads.net/v1.0/{threads_user_id}/threads_publish"
+        r3 = requests.post(
+            publish_url,
+            data={'creation_id': container_id, 'access_token': threads_token},
+            timeout=60
+        )
+        if r3.status_code == 200:
+            media_id = r3.json().get('id', '')
+            link = f"https://www.threads.net/post/{media_id}"
+            print(f"✅ Threads pubblicato: {link}")
+            return link
+        else:
+            print(f"❌ Threads publish error ({r3.status_code}): {r3.text[:200]}")
+            return ""
+
+    except Exception as e:
+        print(f"❌ Errore Threads: {e}")
+        return ""
+
+
 def send_telegram(video_file, caption, channel=True):
     """Invia video su Telegram (canale o chat personale) con gestione errori di parsing HTML."""
     target = TELEGRAM_CHANNEL_ID if (channel and TELEGRAM_CHANNEL_ID) else CHAT_ID
@@ -533,6 +619,7 @@ def send_whatsapp_report(risultati, indirizzo):
         badge("facebook", "Facebook", "📘"),
         badge("instagram", "Instagram", "📸"),
         badge("telegram", "Telegram", "✈️"),
+        badge("threads", "Threads", "🧵"),
         badge("wordpress", "Sito Web", "🌐"),
         badge("gmb", "Google Business", "🏢"),
         "",
@@ -722,10 +809,11 @@ def pipeline_nuovo_immobile():
     has_fb = bool(existing.get("fb", "").strip() or existing.get("facebook", "").strip())
     has_ig = bool(existing.get("ig", "").strip() or existing.get("instagram", "").strip())
     has_tg = bool(existing.get("tg", "").strip() or existing.get("telegram", "").strip())
+    has_threads = bool(existing.get("threads", "").strip())
     has_wp = bool(existing.get("wp", "").strip() or existing.get("wordpress", "").strip() or existing.get("website", "").strip())
     has_gmb = bool(existing.get("gmb", "").strip() or existing.get("google_business", "").strip() or existing.get("google_business_profile", "").strip())
 
-    print(f"📋 Link esistenti: YT={'⏭️' if has_yt else '📤'} | FB={'⏭️' if has_fb else '📤'} | IG={'⏭️' if has_ig else '📤'} | TG={'⏭️' if has_tg else '📤'} | WP={'⏭️' if has_wp else '📤'} | GMB={'⏭️' if has_gmb else '📤'}")
+    print(f"📋 Link esistenti: YT={'⏭️' if has_yt else '📤'} | FB={'⏭️' if has_fb else '📤'} | IG={'⏭️' if has_ig else '📤'} | TG={'⏭️' if has_tg else '📤'} | Threads={'⏭️' if has_threads else '📤'} | WP={'⏭️' if has_wp else '📤'} | GMB={'⏭️' if has_gmb else '📤'}")
 
     _, youtube = get_google_services()
 
@@ -736,6 +824,7 @@ def pipeline_nuovo_immobile():
         "facebook": "skip" if has_fb else "",
         "instagram": "skip" if has_ig else "",
         "telegram": "skip" if has_tg else "",
+        "threads": "skip" if has_threads else "",
         "wordpress": "skip" if has_wp else "",
         "gmb": "skip" if has_gmb else "",
         "indirizzo": INPUT_INDIRIZZO,
@@ -782,7 +871,6 @@ def pipeline_nuovo_immobile():
 
     if not has_ig:
         fb_url_for_ig = ""
-        global LATEST_FB_VIDEO_DIRECT_URL
         
         if risultati["facebook"] and risultati["facebook"] not in ("", "skip"):
             fb_url_for_ig = LATEST_FB_VIDEO_DIRECT_URL
@@ -801,8 +889,28 @@ def pipeline_nuovo_immobile():
             fb_video_url=fb_url_for_ig
         )
 
+    # Nuova integrazione: Threads
+    if not has_threads:
+        fb_url_for_threads = ""
+        if risultati["facebook"] and risultati["facebook"] not in ("", "skip"):
+            fb_url_for_threads = LATEST_FB_VIDEO_DIRECT_URL
+        elif has_fb:
+            existing_fb_url = existing.get("fb", "") or existing.get("facebook", "")
+            video_id = extract_facebook_video_id(existing_fb_url)
+            if video_id:
+                fb_url_for_threads = get_facebook_video_direct_url(video_id)
+
+        if not fb_url_for_threads and INPUT_VIDEO_URL and INPUT_VIDEO_URL.startswith("http"):
+            fb_url_for_threads = INPUT_VIDEO_URL
+
+        risultati["threads"] = upload_threads(
+            video_editato,
+            INPUT_SEO_DESCRIPTION or "Nuova opportunità immobiliare",
+            fb_video_url=fb_url_for_threads
+        )
+
+    # Costruiamo una descrizione arricchita con i link dei social per Telegram e includiamo Threads se disponibile
     if not has_tg:
-        # Costruiamo una descrizione arricchita con i link dei social per Telegram
         descrizione_tg = INPUT_SEO_DESCRIPTION or "Nuova opportunità immobiliare"
         
         link_social_tg = []
@@ -817,6 +925,10 @@ def pipeline_nuovo_immobile():
         ig_link = risultati.get("instagram") or existing.get("ig") or existing.get("instagram")
         if ig_link and ig_link != "skip":
             link_social_tg.append(f"📸 Instagram: {ig_link}")
+
+        threads_link = risultati.get("threads") or existing.get("threads")
+        if threads_link and threads_link != "skip":
+            link_social_tg.append(f"🧵 Threads: {threads_link}")
             
         if link_social_tg:
             descrizione_tg += "\n\n🔗 *Guarda anche su:* \n" + "\n".join(link_social_tg)
@@ -829,9 +941,9 @@ def pipeline_nuovo_immobile():
         risultati["telegram"] = tg_result
 
     if not has_wp:
-        post_video_link = risultati.get("youtube") or risultati.get("facebook") or video_url
+        post_video_link = risultati.get("youtube") or risultati.get("facebook") or INPUT_VIDEO_URL
         if post_video_link == "skip":
-            post_video_link = existing.get("youtube") or existing.get("facebook") or video_url
+            post_video_link = existing.get("youtube") or existing.get("facebook") or INPUT_VIDEO_URL
         
         risultati["wordpress"] = upload_wordpress(
             title=INPUT_SEO_TITLE or f"Nuova Proposta Immobiliare a {INPUT_INDIRIZZO}",
@@ -840,9 +952,9 @@ def pipeline_nuovo_immobile():
         )
 
     if not has_gmb:
-        gmb_cta_link = risultati.get("youtube") or risultati.get("facebook") or video_url
+        gmb_cta_link = risultati.get("youtube") or risultati.get("facebook") or INPUT_VIDEO_URL
         if gmb_cta_link == "skip":
-            gmb_cta_link = existing.get("youtube") or existing.get("facebook") or video_url
+            gmb_cta_link = existing.get("youtube") or existing.get("facebook") or INPUT_VIDEO_URL
             
         risultati["gmb"] = upload_google_business(
             summary=INPUT_SEO_DESCRIPTION or "Nuova proposta in agenzia.",
@@ -862,11 +974,11 @@ def pipeline_nuovo_immobile():
     print(f"   Facebook:  {risultati['facebook'][:60] if risultati['facebook'] else 'N/A'}")
     print(f"   Instagram: {risultati['instagram'][:60] if risultati['instagram'] else 'N/A'}")
     print(f"   Telegram:  {risultati['telegram']}")
+    print(f"   Threads:   {risultati['threads'][:60] if risultati['threads'] else 'N/A'}")
     print(f"   WordPress: {risultati['wordpress'][:60] if risultati['wordpress'] else 'N/A'}")
     print(f"   Google BP: {risultati['gmb']}")
     print("=" * 50)
     print("\n✨ Antonio Giancani")
-
 
 
 def aggiorna_catalogo_ia_wordpress():
@@ -878,7 +990,6 @@ def aggiorna_catalogo_ia_wordpress():
         
     try:
         gc, _ = get_google_services()
-        # Fallback se non riusciamo ad aprire il foglio
         try:
             sh = gc.open_by_key("1s68pw0WEUcV0ZqltiahAqCp_r5rsycSjxKNh0VZQq_g")
         except Exception:
@@ -1064,29 +1175,28 @@ def aggiorna_catalogo_ia_wordpress():
         }
         
         if page_id:
-            print(f"\u2194 Pagina esistente trovata (ID: {page_id}). Aggiornamento...")
+            print(f"↔ Pagina esistente trovata (ID: {page_id}). Aggiornamento...")
             update_endpoint = f"{base_url}wp-json/wp/v2/pages/{page_id}"
             r_up = requests.post(update_endpoint, auth=auth, json=payload, timeout=30)
             if r_up.status_code in (200, 201):
-                print(f"\u2705 Catalogo IA aggiornato con successo: {r_up.json().get('link')}")
+                print(f"✅ Catalogo IA aggiornato con successo: {r_up.json().get('link')}")
             else:
-                print(f"\u274c Errore aggiornamento catalogo ({r_up.status_code}): {r_up.text[:200]}")
+                print(f"❌ Errore aggiornamento catalogo ({r_up.status_code}): {r_up.text[:200]}")
         else:
-            print("\ud83c\udd96 Pagina non trovata. Creazione in corso...")
+            print("🆕 Pagina non trovata. Creazione in corso...")
             payload["slug"] = "catalogo-immobili-ia"
             create_endpoint = f"{base_url}wp-json/wp/v2/pages"
             r_cr = requests.post(create_endpoint, auth=auth, json=payload, timeout=30)
             if r_cr.status_code in (200, 201):
-                print(f"\u2705 Catalogo IA creato con successo: {r_cr.json().get('link')}")
+                print(f"✅ Catalogo IA creato con successo: {r_cr.json().get('link')}")
             else:
-                print(f"\u274c Errore creazione catalogo ({r_cr.status_code}): {r_cr.text[:200]}")
+                print(f"❌ Errore creazione catalogo ({r_cr.status_code}): {r_cr.text[:200]}")
                 
     except Exception as e:
-        print(f"\u274c Eccezione durante la sincronizzazione del catalogo IA: {e}")
+        print(f"❌ Eccezione durante la sincronizzazione del catalogo IA: {e}")
 
 
 def main():
-
     print("🤖 Bot Pubblicazione Immobiliare — Avvio")
     print(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
