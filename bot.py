@@ -130,8 +130,18 @@ def download_video(url, sorgente="Auto"):
         except Exception as e:
             print(f"⚠️ Download diretto fallito ({e}), provo yt-dlp come fallback...")
 
-    # ── FALLBACK: comportamento originale con yt-dlp ──────────────────────
-    try:
+    # ── FALLBACK: yt-dlp con più tentativi (cookie YouTube + client alternativi) ──
+    # Ordine: 1) con cookie (se presenti) 2) client Android (spesso bypassa il
+    # controllo anti-bot del client web) 3) tentativo standard originale.
+    cookies_file = "cookies_youtube.txt"
+    tentativi_extra = []
+    if os.path.exists(cookies_file):
+        tentativi_extra.append((["--cookies", cookies_file], "con cookie YouTube"))
+    tentativi_extra.append((["--extractor-args", "youtube:player_client=android"], "client Android"))
+    tentativi_extra.append(([], "standard"))
+
+    for extra_args, descrizione in tentativi_extra:
+        print(f"🔁 yt-dlp tentativo ({descrizione})...")
         comando = [
             'yt-dlp',
             '--socket-timeout', '60',
@@ -140,22 +150,22 @@ def download_video(url, sorgente="Auto"):
             '-o', output_filename,
             '--force-overwrites',
             '--no-playlist'
-        ]
-        subprocess.run(comando, check=True, timeout=120)
-        if os.path.exists(output_filename):
-            size_mb = os.path.getsize(output_filename) / (1024 * 1024)
-            print(f"✅ Video scaricato: {output_filename} ({size_mb:.1f} MB)")
-            return output_filename
-        return None
-    except subprocess.TimeoutExpired:
-        print(f"❌ Timeout download da {sorgente}")
-        return None
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Errore yt-dlp su {sorgente}: {e}")
-        return None
-    except Exception as e:
-        print(f"❌ Errore generico download da {sorgente}: {e}")
-        return None
+        ] + extra_args
+        try:
+            subprocess.run(comando, check=True, timeout=120)
+            if os.path.exists(output_filename):
+                size_mb = os.path.getsize(output_filename) / (1024 * 1024)
+                print(f"✅ Video scaricato ({descrizione}): {output_filename} ({size_mb:.1f} MB)")
+                return output_filename
+        except subprocess.TimeoutExpired:
+            print(f"⚠️ Timeout tentativo ({descrizione}) su {sorgente}")
+        except subprocess.CalledProcessError as e:
+            print(f"⚠️ Tentativo ({descrizione}) fallito su {sorgente}: {e}")
+        except Exception as e:
+            print(f"⚠️ Errore generico tentativo ({descrizione}) su {sorgente}: {e}")
+
+    print(f"❌ Tutti i tentativi yt-dlp falliti per {sorgente}")
+    return None
 
 
 def edit_video(input_file, durata=30):
