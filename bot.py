@@ -88,10 +88,49 @@ def get_google_services():
     return gspread.authorize(creds_g), build('youtube', 'v3', credentials=creds_yt)
 
 
+def is_direct_video_url(url):
+    """
+    Rileva se l'URL è già un link diretto al file video (CDN), non una
+    pagina da scrapare con yt-dlp. Usato per gli URL pre-risolti da Apps
+    Script tramite la Graph API di Facebook (campo 'source').
+    """
+    if not url:
+        return False
+    url_lower = url.lower()
+    if "fbcdn.net" in url_lower:
+        return True
+    # es. https://.../video.mp4?token=... — controlliamo solo il path, non la query string
+    path_only = url_lower.split("?")[0]
+    if path_only.endswith(".mp4"):
+        return True
+    return False
+
+
 def download_video(url, sorgente="Auto"):
-    """Scarica video da qualsiasi piattaforma social con yt-dlp."""
+    """Scarica video: fast-path per URL diretti (CDN), fallback a yt-dlp per il resto."""
     output_filename = "video_scaricato.mp4"
     print(f"📥 Scaricamento video da {sorgente}: {url}")
+
+    # ── FAST PATH: URL già risolto (es. da Apps Script) ──────────────────
+    if is_direct_video_url(url):
+        print("⚡ Rilevato URL diretto (CDN) — download rapido senza yt-dlp...")
+        try:
+            r = requests.get(url, stream=True, timeout=120)
+            if r.status_code == 200:
+                with open(output_filename, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=1024 * 1024):
+                        if chunk:
+                            f.write(chunk)
+                if os.path.exists(output_filename):
+                    size_mb = os.path.getsize(output_filename) / (1024 * 1024)
+                    print(f"✅ Video scaricato (download diretto): {output_filename} ({size_mb:.1f} MB)")
+                    return output_filename
+            else:
+                print(f"⚠️ Download diretto fallito (status {r.status_code}), provo yt-dlp come fallback...")
+        except Exception as e:
+            print(f"⚠️ Download diretto fallito ({e}), provo yt-dlp come fallback...")
+
+    # ── FALLBACK: comportamento originale con yt-dlp ──────────────────────
     try:
         comando = [
             'yt-dlp',
@@ -223,11 +262,11 @@ def upload_facebook(video_file, descrizione):
             video_id = r.json().get('id', '')
             link = f"https://www.facebook.com/{FB_PAGE_ID}/videos/{video_id}"
             print(f"✅ Facebook pubblicato: {link}")
-            
+
             # Cerca e memorizza immediatamente la URL del file MP4 diretto per Instagram Reels
             global LATEST_FB_VIDEO_DIRECT_URL
             LATEST_FB_VIDEO_DIRECT_URL = get_facebook_video_direct_url(video_id)
-            
+
             return link
         else:
             print(f"❌ Errore Facebook ({r.status_code}): {r.text[:200]}")
@@ -355,7 +394,7 @@ def upload_threads(video_file, caption, fb_video_url=""):
     print("🧵 Upload Threads...")
     threads_token = os.environ.get("THREADS_ACCESS_TOKEN")
     threads_user_id = os.environ.get("THREADS_USER_ID")
-    
+
     if not threads_token or not threads_user_id:
         print("⚠️ Threads: credenziali mancanti (THREADS_ACCESS_TOKEN o THREADS_USER_ID), skip")
         return "skip"
@@ -449,7 +488,7 @@ def send_telegram(video_file, caption, channel=True):
     testo = caption[:1024] + BRANDING if len(caption) < 1000 else caption[:990] + BRANDING
     try:
         tg_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo"
-        
+
         # Tentativo 1: Invio con formattazione HTML
         print(f"✈️ {label}: provo con parse_mode='HTML'...")
         with open(video_file, "rb") as f:
@@ -459,7 +498,7 @@ def send_telegram(video_file, caption, channel=True):
                 files={"video": f},
                 timeout=120
             )
-        
+
         if r.status_code == 200:
             print(f"✅ {label}: inviato con successo!")
             return "ok"
@@ -725,7 +764,7 @@ def ricicla_post():
 
     url_fb_vecchio = post_da_riciclare.get("Link_Facebook", "").strip()
     url_yt_vecchio = post_da_riciclare.get("Link_YouTube", "").strip()
-    
+
     # Regola di estrazione dati: i testi devono essere prelevati rigorosamente dalla Colonna F (Indice 5)
     testo_vecchio = ""
     try:
@@ -755,7 +794,7 @@ def ricicla_post():
     nuovo_link_fb = upload_facebook(video_temp, nuovo_testo)
     titolo_yt = f"RIPROPOSTA: {post_da_riciclare.get('Tipologia_Immobile', 'Immobile')} a {post_da_riciclare.get('Citta', 'Favara')}"
     nuovo_link_yt = upload_youtube(youtube, video_temp, titolo_yt, nuovo_testo)
-    
+
     # Costruiamo una descrizione arricchita con i link dei social per Telegram
     testo_tg = nuovo_testo
     link_social_tg = []
@@ -765,7 +804,7 @@ def ricicla_post():
         link_social_tg.append(f"📘 Facebook: {nuovo_link_fb}")
     if link_social_tg:
         testo_tg += "\n\n🔗 *Guarda anche su:* \n" + "\n".join(link_social_tg)
-        
+
     send_telegram(video_temp, testo_tg, channel=False)
 
     col_pubblicato_idx = headers.index("Pubblicato") + 1
@@ -838,6 +877,14 @@ def pipeline_nuovo_immobile():
     possibili_url = []
     if INPUT_VIDEO_URL:
         possibili_url.append((INPUT_VIDEO_URL, "Input Video"))
+
+    # NUOVO: se Apps Script ha già risolto il link diretto (CDN) del video Facebook
+    # tramite Graph API, lo proviamo subito dopo l'input principale — è un download
+    # rapido via requests, non richiede yt-dlp e non passa dal login-wall di Facebook.
+    fb_direct = existing.get("fb_direct", "").strip()
+    if fb_direct and fb_direct not in [u[0] for u in possibili_url]:
+        possibili_url.append((fb_direct, "FB Direct (risolto)"))
+
     for key in ["yt", "youtube", "fb", "facebook", "ig", "instagram"]:
         url = existing.get(key, "").strip()
         if url and url not in [u[0] for u in possibili_url]:
@@ -874,7 +921,7 @@ def pipeline_nuovo_immobile():
 
     if not has_ig:
         fb_url_for_ig = ""
-        
+
         if risultati["facebook"] and risultati["facebook"] not in ("", "skip"):
             fb_url_for_ig = LATEST_FB_VIDEO_DIRECT_URL
         elif has_fb:
@@ -915,16 +962,16 @@ def pipeline_nuovo_immobile():
     # Costruiamo una descrizione arricchita con i link dei social per Telegram e includiamo Threads se disponibile
     if not has_tg:
         descrizione_tg = INPUT_SEO_DESCRIPTION or "Nuova opportunità immobiliare"
-        
+
         link_social_tg = []
         yt_link = risultati.get("youtube") or existing.get("yt") or existing.get("youtube")
         if yt_link and yt_link != "skip":
             link_social_tg.append(f"📺 YouTube: {yt_link}")
-            
+
         fb_link = risultati.get("facebook") or existing.get("fb") or existing.get("facebook")
         if fb_link and fb_link != "skip":
             link_social_tg.append(f"📘 Facebook: {fb_link}")
-            
+
         ig_link = risultati.get("instagram") or existing.get("ig") or existing.get("instagram")
         if ig_link and ig_link != "skip":
             link_social_tg.append(f"📸 Instagram: {ig_link}")
@@ -932,10 +979,10 @@ def pipeline_nuovo_immobile():
         threads_link = risultati.get("threads") or existing.get("threads")
         if threads_link and threads_link != "skip":
             link_social_tg.append(f"🧵 Threads: {threads_link}")
-            
+
         if link_social_tg:
             descrizione_tg += "\n\n🔗 *Guarda anche su:* \n" + "\n".join(link_social_tg)
-            
+
         tg_result = send_telegram(
             video_editato,
             descrizione_tg,
@@ -947,7 +994,7 @@ def pipeline_nuovo_immobile():
         post_video_link = risultati.get("youtube") or risultati.get("facebook") or INPUT_VIDEO_URL
         if post_video_link == "skip":
             post_video_link = existing.get("youtube") or existing.get("facebook") or INPUT_VIDEO_URL
-        
+
         risultati["wordpress"] = upload_wordpress(
             title=INPUT_SEO_TITLE or f"Nuova Proposta Immobiliare a {INPUT_INDIRIZZO}",
             description=INPUT_SEO_DESCRIPTION or "Scopri tutti i dettagli di questo immobile.",
@@ -958,7 +1005,7 @@ def pipeline_nuovo_immobile():
         gmb_cta_link = risultati.get("youtube") or risultati.get("facebook") or INPUT_VIDEO_URL
         if gmb_cta_link == "skip":
             gmb_cta_link = existing.get("youtube") or existing.get("facebook") or INPUT_VIDEO_URL
-            
+
         risultati["gmb"] = upload_google_business(
             summary=INPUT_SEO_DESCRIPTION or "Nuova proposta in agenzia.",
             action_url=gmb_cta_link
@@ -990,14 +1037,14 @@ def aggiorna_catalogo_ia_wordpress():
     if not WP_URL or not WP_USER or not WP_PASSWORD:
         print("⚠️ WordPress: credenziali o URL mancanti, skip aggiornamento catalogo IA")
         return
-        
+
     try:
         gc, _ = get_google_services()
         try:
             sh = gc.open_by_key("1s68pw0WEUcV0ZqltiahAqCp_r5rsycSjxKNh0VZQq_g")
         except Exception:
             sh = gc.open_by_key(SHEET_ID)
-            
+
         try:
             ws = sh.worksheet("Piano_Editoriale_2026")
         except Exception:
@@ -1006,20 +1053,20 @@ def aggiorna_catalogo_ia_wordpress():
             except Exception:
                 print("⚠️ Impossibile trovare la scheda Piano_Editoriale_2026 o ANNUNCI_ATTIVI")
                 return
-                
+
         all_values = ws.get_all_values()
         if not all_values or len(all_values) <= 1:
             print("⚠️ Nessun dato presente nel foglio")
             return
-            
+
         headers = [h.strip().upper() for h in all_values[0]]
-        
+
         def get_col_idx(names, default):
             for name in names:
                 if name.upper() in headers:
                     return headers.index(name.upper())
             return default
-            
+
         # Regola di estrazione dati: il testo descrittivo dell'immobile viene prelevato rigorosamente dalla Colonna F (Indice 5)
         idx_testo = 5
         idx_tipo = get_col_idx(["TIPO", "TIPOLOGIA"], 3)
@@ -1027,24 +1074,24 @@ def aggiorna_catalogo_ia_wordpress():
         idx_stato = get_col_idx(["STATO"], 2)
         idx_data = get_col_idx(["DATA", "DATA_PUBBLICAZIONE"], 1)
         idx_id = get_col_idx(["ID", "ID_ANNUNCIO", "ID_IMMOBILE"], 0)
-        
+
         annunci_attivi = []
         for r_idx, r in enumerate(all_values[1:], start=2):
             r_len = len(r)
             stato = r[idx_stato].strip().upper() if idx_stato < r_len else ""
             testo = r[idx_testo].strip() if idx_testo < r_len else ""
-            
+
             if testo and stato in ("SI", "ATTIVO", "DISPONIBILE", "PUBBLICATO"):
                 tipo = r[idx_tipo].strip() if idx_tipo < r_len else "Immobile"
                 link = r[idx_link].strip() if idx_link < r_len else ""
                 data = r[idx_data].strip() if idx_data < r_len else ""
                 ann_id = r[idx_id].strip() if idx_id < r_len else f"ANN-{r_idx}"
-                
+
                 zona = "Favara"
                 citta_match = re.search(r'\b(favara|aragona|agrigento|porto empedocle|canicatt\u00ec|licata)\b', testo.lower())
                 if citta_match:
                     zona = citta_match.group(1).capitalize()
-                
+
                 annunci_attivi.append({
                     "id": ann_id,
                     "data": data,
@@ -1053,12 +1100,12 @@ def aggiorna_catalogo_ia_wordpress():
                     "link": link,
                     "zona": zona
                 })
-                
+
         print(f"📊 Trovati {len(annunci_attivi)} annunci attivi per il catalogo IA.")
         if not annunci_attivi:
             print("⚠️ Nessun annuncio attivo da pubblicare, skip")
             return
-            
+
         html_content = (
             "<p>Benvenuto nel catalogo degli immobili attivi gestiti direttamente da <strong>Antonio Giancani</strong>. "
             "Questa pagina raccoglie l'elenco aggiornato in tempo reale delle propriet\u00e0 immobiliari disponibili a Favara, Aragona, Agrigento e dintorni. "
@@ -1066,9 +1113,9 @@ def aggiorna_catalogo_ia_wordpress():
             "<hr style='margin: 30px 0;'>"
             "<div class='ia-listings-container'>"
         )
-        
+
         json_ld_list = []
-        
+
         for idx, ann in enumerate(annunci_attivi):
             prezzo = "Su Richiesta"
             prezzo_val = ""
@@ -1077,11 +1124,11 @@ def aggiorna_catalogo_ia_wordpress():
                 prezzo_str = prezzo_match.group(1).replace(".", "")
                 prezzo_val = prezzo_str
                 prezzo = f"\u20ac {int(prezzo_str):,}".replace(",", ".")
-            
+
             desc_cleaned = ann["testo"].replace('"', '\\"').replace('\n', ' ').replace('\r', '')
             if len(desc_cleaned) > 250:
                 desc_cleaned = desc_cleaned[:250] + "..."
-                
+
             html_content += f"""
             <div class="ia-listing-item" style="border: 1px solid #e2e8f0; padding: 20px; margin-bottom: 25px; border-radius: 8px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
                 <h3 style="margin-top: 0; color: #1e293b;">{ann["tipo"]} in Vendita a {ann["zona"]}</h3>
@@ -1091,14 +1138,14 @@ def aggiorna_catalogo_ia_wordpress():
             """
             if ann["link"]:
                 html_content += f'<p style="margin: 10px 0;">\ud83c\udfa5 <strong>Video Presentazione:</strong> <a href="{ann["link"]}" target="_blank" rel="noopener">Guarda il video dell\'immobile</a></p>'
-                
+
             html_content += f"""
                 <p style="margin: 15px 0 0 0; padding-top: 10px; border-top: 1px dashed #e2e8f0;">
                     \ud83d\udcde <strong>Contatto Referente:</strong> Per informazioni e appuntamenti contattare <strong>Antonio Giancani</strong> al numero <a href="tel:+393201667156">+39 320 166 7156</a>.
                 </p>
             </div>
             """
-            
+
             item_schema = {
                 "@type": "ListItem",
                 "position": idx + 1,
@@ -1123,9 +1170,9 @@ def aggiorna_catalogo_ia_wordpress():
                 }
             }
             json_ld_list.append(item_schema)
-            
+
         html_content += "</div>"
-        
+
         schema_graph = {
             "@context": "https://schema.org",
             "@graph": [
@@ -1152,31 +1199,31 @@ def aggiorna_catalogo_ia_wordpress():
                 }
             ]
         }
-        
+
         json_ld_script = f"\n\n<script type='application/ld+json'>\n{json.dumps(schema_graph, indent=2)}\n</script>"
         full_page_html = html_content + json_ld_script
-        
+
         base_url = WP_URL.strip()
         if not base_url.endswith("/"):
             base_url += "/"
-            
+
         search_endpoint = f"{base_url}wp-json/wp/v2/pages?slug=catalogo-immobili-ia"
         from requests.auth import HTTPBasicAuth
         auth = HTTPBasicAuth(WP_USER, WP_PASSWORD)
-        
+
         r = requests.get(search_endpoint, auth=auth, timeout=20)
         page_id = None
         if r.status_code == 200:
             pages = r.json()
             if pages and len(pages) > 0:
                 page_id = pages[0].get("id")
-                
+
         payload = {
             "title": "Catalogo Immobili Attivi per Motori di Ricerca IA",
             "content": full_page_html,
             "status": "publish"
         }
-        
+
         if page_id:
             print(f"↔ Pagina esistente trovata (ID: {page_id}). Aggiornamento...")
             update_endpoint = f"{base_url}wp-json/wp/v2/pages/{page_id}"
@@ -1194,7 +1241,7 @@ def aggiorna_catalogo_ia_wordpress():
                 print(f"✅ Catalogo IA creato con successo: {r_cr.json().get('link')}")
             else:
                 print(f"❌ Errore creazione catalogo ({r_cr.status_code}): {r_cr.text[:200]}")
-                
+
     except Exception as e:
         print(f"❌ Eccezione durante la sincronizzazione del catalogo IA: {e}")
 
