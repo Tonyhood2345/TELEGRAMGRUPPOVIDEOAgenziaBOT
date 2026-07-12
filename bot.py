@@ -47,14 +47,17 @@ GMB_ACCOUNT_ID = os.environ.get("GMB_ACCOUNT_ID", "")
 GMB_LOCATION_ID = os.environ.get("GMB_LOCATION_ID", "")
 
 # Input da workflow_dispatch (modalità NUOVO IMMOBILE)
-INPUT_JOB_ID = os.environ.get("INPUT_JOB_ID", "")
-INPUT_VIDEO_URL = os.environ.get("INPUT_VIDEO_URL", "")
-INPUT_SEO_TITLE = os.environ.get("INPUT_SEO_TITLE", "")
-INPUT_SEO_DESCRIPTION = os.environ.get("INPUT_SEO_DESCRIPTION", "")
-INPUT_SEO_HASHTAGS = os.environ.get("INPUT_SEO_HASHTAGS", "")
-INPUT_INDIRIZZO = os.environ.get("INPUT_INDIRIZZO", "")
-INPUT_CALLBACK_URL = os.environ.get("INPUT_CALLBACK_URL", "")
-INPUT_EXISTING_LINKS = os.environ.get("INPUT_EXISTING_LINKS", "{}")
+INPUT_JOB_ID = os.environ.get("INPUT_JOB_ID", "").strip()
+INPUT_VIDEO_URL = os.environ.get("INPUT_VIDEO_URL", "").strip()
+INPUT_SEO_TITLE = os.environ.get("INPUT_SEO_TITLE", "").strip()
+INPUT_SEO_DESCRIPTION = os.environ.get("INPUT_SEO_DESCRIPTION", "").strip()
+INPUT_SEO_HASHTAGS = os.environ.get("INPUT_SEO_HASHTAGS", "").strip()
+INPUT_INDIRIZZO = os.environ.get("INPUT_INDIRIZZO", "").strip()
+INPUT_CALLBACK_URL = os.environ.get("INPUT_CALLBACK_URL", "").strip()
+INPUT_EXISTING_LINKS = os.environ.get("INPUT_EXISTING_LINKS", "{}").strip()
+
+# Evento GitHub Actions: 'workflow_dispatch' = avvio manuale, 'schedule' = cron
+GITHUB_EVENT_NAME = os.environ.get("GITHUB_EVENT_NAME", "").strip()
 
 SHEET_ID = "19m1cStsqyCvzz3-AYFJKPnrLPNaDuCXEKM8Fka76-Hc"
 BRANDING = "\n\n✨ Antonio Giancani"
@@ -1199,10 +1202,22 @@ def aggiorna_catalogo_ia_wordpress():
 def main():
     print("🤖 Bot Pubblicazione Immobiliare — Avvio")
     print(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"🔔 Evento GitHub: {GITHUB_EVENT_NAME or 'non rilevato (test locale)'}")
+    print(f"📋 INPUT_VIDEO_URL: '{INPUT_VIDEO_URL[:60] if INPUT_VIDEO_URL else ''}'")
+    print(f"📋 INPUT_JOB_ID: '{INPUT_JOB_ID}'")
 
-    if INPUT_VIDEO_URL or INPUT_JOB_ID:
+    # Modalità NUOVO IMMOBILE se:
+    # 1. È un workflow_dispatch (avvio manuale), OPPURE
+    # 2. Ha INPUT_VIDEO_URL o INPUT_JOB_ID valorizzati (chiamata da DarIA)
+    e_dispatch = GITHUB_EVENT_NAME == "workflow_dispatch"
+    ha_parametri = bool(INPUT_VIDEO_URL or INPUT_JOB_ID)
+
+    if e_dispatch or ha_parametri:
+        if e_dispatch and not ha_parametri:
+            print("ℹ️  workflow_dispatch senza parametri → modalità NUOVO IMMOBILE (attendi parametri da DarIA)")
         pipeline_nuovo_immobile()
     else:
+        print("⏰ Avvio da CRON → modalità RICICLO POST")
         ricicla_post()
 
     # Sincronizza sempre il catalogo WordPress per l'ottimizzazione IA al termine
