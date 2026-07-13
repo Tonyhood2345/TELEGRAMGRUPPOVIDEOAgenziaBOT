@@ -50,10 +50,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Configura Node.js (per decodifica JavaScript yt-dlp)
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+      - name: Installazione Deno (richiesto da yt-dlp per decodifica YouTube)
+        run: |
+          curl -fsSL https://deno.land/install.sh | sh
+          echo "$HOME/.deno/bin" >> $GITHUB_PATH
 
       - name: Installazione pacchetti di sistema (FFmpeg)
         run: |
