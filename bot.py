@@ -718,6 +718,18 @@ def send_whatsapp_report(risultati, indirizzo):
     except Exception as e:
         print(f"⚠️ Errore WhatsApp report: {e}")
 
+    # Invio di sicurezza di backup anche su Telegram personale
+    if TELEGRAM_TOKEN and CHAT_ID:
+        try:
+            print("🟢 Invio report Telegram di sicurezza al Boss...")
+            tg_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+            # Pulizia markdown per evitare errori di parse
+            testo_tg = testo.replace("*", "").replace("_", "")
+            requests.post(tg_url, data={"chat_id": CHAT_ID, "text": testo_tg}, timeout=15)
+            print("✅ Report Telegram inviato con successo!")
+        except Exception as etg:
+            print(f"⚠️ Errore invio report di sicurezza Telegram: {etg}")
+
 
 def callback_daria(url, payload):
     """Invia risultati alla DarIA WebApp via POST callback."""
@@ -912,29 +924,37 @@ def pipeline_nuovo_immobile():
         else:
             print(f"⚠️ Tentativo fallito da {sorgente}, provo il prossimo...")
 
-    if not video_file:
-        print("❌ Tutti i tentativi di download del video sono falliti!")
-        risultati["status"] = "error"
-        risultati["error"] = "Download fallito"
-        send_whatsapp_report(risultati, INPUT_INDIRIZZO)
-        callback_daria(INPUT_CALLBACK_URL, risultati)
-        return
+    # Strategia tollerante agli errori di download
+    video_editato = None
+    if video_file:
+        video_editato = edit_video(video_file, durata=30)
+    else:
+        print("⚠️ Attivazione modalità FALLBACK TESTUALE: Impossibile scaricare il file video, pubblico solo i testi su Telegram, Sito e Google Business.")
+        risultati["status"] = "parziale"
+        risultati["youtube"] = "skip (video non disponibile)"
+        risultati["facebook"] = "skip (video non disponibile)"
+        risultati["instagram"] = "skip (video non disponibile)"
+        risultati["threads"] = "skip (video non disponibile)"
 
-    video_editato = edit_video(video_file, durata=30)
-
-    if not has_fb:
+    # ── FACEBOOK (richiede video)
+    if not has_fb and video_editato:
         risultati["facebook"] = upload_facebook(video_editato, INPUT_SEO_DESCRIPTION)
+    elif not has_fb and not video_editato:
+        risultati["facebook"] = "errore (video non disponibile)"
 
-    if not has_yt:
+    # ── YOUTUBE (richiede video)
+    if not has_yt and video_editato:
         risultati["youtube"] = upload_youtube(
             youtube, video_editato,
             INPUT_SEO_TITLE or f"Immobile a {INPUT_INDIRIZZO}",
             INPUT_SEO_DESCRIPTION or "Scopri questa opportunità immobiliare"
         )
+    elif not has_yt and not video_editato:
+        risultati["youtube"] = "errore (video non disponibile)"
 
-    if not has_ig:
+    # ── INSTAGRAM (richiede video)
+    if not has_ig and video_editato:
         fb_url_for_ig = ""
-        
         if risultati["facebook"] and risultati["facebook"] not in ("", "skip"):
             fb_url_for_ig = LATEST_FB_VIDEO_DIRECT_URL
         elif has_fb:
@@ -951,9 +971,11 @@ def pipeline_nuovo_immobile():
             INPUT_SEO_DESCRIPTION or "Nuova opportunità immobiliare",
             fb_video_url=fb_url_for_ig
         )
+    elif not has_ig and not video_editato:
+        risultati["instagram"] = "errore (video non disponibile)"
 
-    # Nuova integrazione: Threads
-    if not has_threads:
+    # ── THREADS (richiede video in questo setup)
+    if not has_threads and video_editato:
         fb_url_for_threads = ""
         if risultati["facebook"] and risultati["facebook"] not in ("", "skip"):
             fb_url_for_threads = LATEST_FB_VIDEO_DIRECT_URL
@@ -971,49 +993,68 @@ def pipeline_nuovo_immobile():
             INPUT_SEO_DESCRIPTION or "Nuova opportunità immobiliare",
             fb_video_url=fb_url_for_threads
         )
+    elif not has_threads and not video_editato:
+        risultati["threads"] = "errore (video non disponibile)"
 
-    # Costruiamo una descrizione arricchita con i link dei social per Telegram e includiamo Threads se disponibile
+    # ── TELEGRAM (supporta sia video che testo semplice)
     if not has_tg:
         descrizione_tg = INPUT_SEO_DESCRIPTION or "Nuova opportunità immobiliare"
         
         link_social_tg = []
         yt_link = risultati.get("youtube") or existing.get("yt") or existing.get("youtube")
-        if yt_link and yt_link != "skip":
+        if yt_link and "http" in str(yt_link):
             link_social_tg.append(f"📺 YouTube: {yt_link}")
             
         fb_link = risultati.get("facebook") or existing.get("fb") or existing.get("facebook")
-        if fb_link and fb_link != "skip":
+        if fb_link and "http" in str(fb_link):
             link_social_tg.append(f"📘 Facebook: {fb_link}")
             
         ig_link = risultati.get("instagram") or existing.get("ig") or existing.get("instagram")
-        if ig_link and ig_link != "skip":
+        if ig_link and "http" in str(ig_link):
             link_social_tg.append(f"📸 Instagram: {ig_link}")
 
         threads_link = risultati.get("threads") or existing.get("threads")
-        if threads_link and threads_link != "skip":
+        if threads_link and "http" in str(threads_link):
             link_social_tg.append(f"🧵 Threads: {threads_link}")
             
         if link_social_tg:
             descrizione_tg += "\n\n🔗 *Guarda anche su:* \n" + "\n".join(link_social_tg)
-            
-        tg_result = send_telegram(
-            video_editato,
-            descrizione_tg,
-            channel=True
-        )
-        risultati["telegram"] = tg_result
 
+        if video_editato:
+            tg_result = send_telegram(video_editato, descrizione_tg, channel=True)
+            risultati["telegram"] = tg_result
+        else:
+            # Fallback a messaggio testuale semplice per Telegram
+            print("✈️ Telegram: invio post testuale semplice...")
+            target = TELEGRAM_CHANNEL_ID if TELEGRAM_CHANNEL_ID else CHAT_ID
+            if TELEGRAM_TOKEN and target:
+                try:
+                    tg_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+                    testo_tg = descrizione_tg[:4000] + BRANDING
+                    requests.post(tg_url, data={"chat_id": target, "text": testo_tg}, timeout=15)
+                    risultati["telegram"] = "ok (testo)"
+                    print("✅ Telegram: post testuale inviato!")
+                except Exception as e_tg:
+                    print(f"❌ Telegram errore invio testo: {e_tg}")
+                    risultati["telegram"] = ""
+            else:
+                risultati["telegram"] = ""
+
+    # ── WORDPRESS (SITO WEB) (supporta testo semplice)
     if not has_wp:
         post_video_link = risultati.get("youtube") or risultati.get("facebook") or INPUT_VIDEO_URL
         if post_video_link == "skip":
             post_video_link = existing.get("youtube") or existing.get("facebook") or INPUT_VIDEO_URL
         
+        # WP funziona sempre, al massimo non embedda il link video se non valido
+        video_embed_url = post_video_link if (post_video_link and "http" in str(post_video_link)) else None
         risultati["wordpress"] = upload_wordpress(
             title=INPUT_SEO_TITLE or f"Nuova Proposta Immobiliare a {INPUT_INDIRIZZO}",
             description=INPUT_SEO_DESCRIPTION or "Scopri tutti i dettagli di questo immobile.",
-            video_url=post_video_link
+            video_url=video_embed_url
         )
 
+    # ── GOOGLE BUSINESS PROFILE (GMB) (supporta sempre testo semplice)
     if not has_gmb:
         gmb_cta_link = risultati.get("youtube") or risultati.get("facebook") or INPUT_VIDEO_URL
         if gmb_cta_link == "skip":
@@ -1021,14 +1062,14 @@ def pipeline_nuovo_immobile():
             
         risultati["gmb"] = upload_google_business(
             summary=INPUT_SEO_DESCRIPTION or "Nuova proposta in agenzia.",
-            action_url=gmb_cta_link
+            action_url=gmb_cta_link if (gmb_cta_link and "http" in str(gmb_cta_link)) else None
         )
 
     send_whatsapp_report(risultati, INPUT_INDIRIZZO)
     callback_daria(INPUT_CALLBACK_URL, risultati)
 
     for f in ["video_scaricato.mp4", "video_editato.mp4"]:
-        if os.path.exists(f):
+        if f and os.path.exists(f):
             os.remove(f)
 
     print("\n" + "=" * 50)
