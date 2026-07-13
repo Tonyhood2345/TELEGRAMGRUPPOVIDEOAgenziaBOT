@@ -48,7 +48,12 @@ jobs:
       - name: Configura Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.11'
+
+      - name: Configura Node.js (per decodifica JavaScript yt-dlp)
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
 
       - name: Installazione pacchetti di sistema (FFmpeg)
         run: |
@@ -81,6 +86,8 @@ jobs:
           WP_PASSWORD: ${{ secrets.WP_PASSWORD }}
           GMB_ACCOUNT_ID: ${{ secrets.GMB_ACCOUNT_ID }}
           GMB_LOCATION_ID: ${{ secrets.GMB_LOCATION_ID }}
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
           INPUT_JOB_ID: ${{ github.event.inputs.job_id }}
           INPUT_VIDEO_URL: ${{ github.event.inputs.video_url }}
           INPUT_SEO_TITLE: ${{ github.event.inputs.seo_title }}
