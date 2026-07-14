@@ -134,9 +134,19 @@ def download_video(url, sorgente="Auto"):
         'Chrome/120.0.0.0 Safari/537.36'
     )
 
-    for i, fmt in enumerate(formati, 1):
+    # Definiamo configurazioni diverse per i tentativi di yt-dlp per bypassare i blocchi
+    strategie = [
+        # Tentativo 1: Client Android (il più efficace per bypassare il login obbligatorio)
+        {'fmt': formati[0], 'args': ['--extractor-args', 'youtube:player-client=android']},
+        # Tentativo 2: Client iOS
+        {'fmt': formati[0], 'args': ['--extractor-args', 'youtube:player-client=ios']},
+        # Tentativo 3: Client web/mweb alternativo
+        {'fmt': formati[0], 'args': ['--extractor-args', 'youtube:player-client=mweb,web']},
+    ]
+
+    for i, strat in enumerate(strategie, 1):
         try:
-            print(f"   🔧 yt-dlp tentativo {i}/3 (formato: {fmt[:40]})")
+            print(f"   🔧 yt-dlp tentativo {i}/{len(strategie)} (formato: {strat['fmt'][:25]} | client: {strat['args'][1]})")
             comando = [
                 'yt-dlp',
                 '--socket-timeout', '90',
@@ -145,13 +155,13 @@ def download_video(url, sorgente="Auto"):
                 '--user-agent', user_agent,
                 '--add-header', 'Accept-Language:it-IT,it;q=0.9,en;q=0.8',
                 '--no-check-certificates',
-                '-f', fmt,
+                '-f', strat['fmt'],
                 url,
                 '-o', output_filename,
                 '--force-overwrites',
                 '--no-playlist',
                 '--merge-output-format', 'mp4',
-            ]
+            ] + strat['args']
             result = subprocess.run(
                 comando, check=True, timeout=300,
                 capture_output=True, text=True
@@ -166,10 +176,6 @@ def download_video(url, sorgente="Auto"):
         except subprocess.CalledProcessError as e:
             stderr = e.stderr[:300] if e.stderr else ''
             print(f"   ❌ yt-dlp errore tentativo {i}: {stderr}")
-            # Se è un errore di bot/autenticazione YouTube, non ha senso riprovare
-            if 'Sign in' in stderr or 'bot' in stderr.lower() or 'HTTP Error 403' in stderr:
-                print("   🚫 YouTube blocca i download da datacenter — salto YouTube")
-                break
             continue
         except Exception as e:
             print(f"   ❌ Errore generico tentativo {i}: {e}")
