@@ -989,13 +989,14 @@ def pipeline_nuovo_immobile():
     if video_editato and full_video_link:
         descrizione_short += f"\n\n🎥 Guarda il video completo: {full_video_link}"
 
-    # ── FACEBOOK (richiede video)
-    if not has_fb and video_editato:
-        risultati["facebook"] = upload_facebook(video_editato, descrizione_short)
-    elif not has_fb and not video_editato:
+    # ── FACEBOOK (richiede video) - Riceve il video INTERO (video_file) e la descrizione senza link
+    if not has_fb and video_file:
+        print("📘 Facebook: pubblico il video INTERO senza link esterni in descrizione...")
+        risultati["facebook"] = upload_facebook(video_file, INPUT_SEO_DESCRIPTION or "Nuovo immobile in proposta.")
+    elif not has_fb and not video_file:
         risultati["facebook"] = "errore (video non disponibile)"
 
-    # ── YOUTUBE (richiede video)
+    # ── YOUTUBE (richiede video) - Shorts riceve il video TAGLIATO (video_editato) e la descrizione con link
     if not has_yt and video_editato:
         risultati["youtube"] = upload_youtube(
             youtube, video_editato,
@@ -1005,10 +1006,10 @@ def pipeline_nuovo_immobile():
     elif not has_yt and not video_editato:
         risultati["youtube"] = "errore (video non disponibile)"
 
-    # ── INSTAGRAM (richiede video)
+    # ── INSTAGRAM (richiede video) - Riceve il video TAGLIATO (video_editato) e la descrizione con link
     if not has_ig and video_editato:
         fb_url_for_ig = ""
-        if risultati["facebook"] and risultati["facebook"] not in ("", "skip"):
+        if risultati["facebook"] and risultati["facebook"] not in ("", "skip", "errore (video non disponibile)"):
             fb_url_for_ig = LATEST_FB_VIDEO_DIRECT_URL
         elif has_fb:
             existing_fb_url = existing.get("fb", "") or existing.get("facebook", "")
@@ -1027,10 +1028,10 @@ def pipeline_nuovo_immobile():
     elif not has_ig and not video_editato:
         risultati["instagram"] = "errore (video non disponibile)"
 
-    # ── THREADS (richiede video in questo setup)
+    # ── THREADS (richiede video) - Riceve il video TAGLIATO (video_editato) e la descrizione con link
     if not has_threads and video_editato:
         fb_url_for_threads = ""
-        if risultati["facebook"] and risultati["facebook"] not in ("", "skip"):
+        if risultati["facebook"] and risultati["facebook"] not in ("", "skip", "errore (video non disponibile)"):
             fb_url_for_threads = LATEST_FB_VIDEO_DIRECT_URL
         elif has_fb:
             existing_fb_url = existing.get("fb", "") or existing.get("facebook", "")
