@@ -863,21 +863,52 @@ def ricicla_post():
 
     print(f"✅ Video pronto ({video_temp}). Inizio ripubblicazione...")
 
+    # Determiniamo il link del video intero originale
+    full_video_link = url_yt_vecchio or url_fb_vecchio
+
+    # Costruiamo la descrizione che include il link del video intero per le piattaforme short
+    descrizione_short = nuovo_testo
+    if full_video_link:
+        descrizione_short += f"\n\n🎥 Guarda il video completo: {full_video_link}"
+
+    # Generiamo la versione di 25 secondi con sfumatura
+    video_editato = edit_video(video_temp, durata=25)
+
+    # ── FACEBOOK (Video INTERO, descrizione pulita senza link)
     nuovo_link_fb = upload_facebook(video_temp, nuovo_testo)
+
+    # ── YOUTUBE (Video CORTO 25s, descrizione con link)
     titolo_yt = f"RIPROPOSTA: {post_da_riciclare.get('Tipologia_Immobile', 'Immobile')} a {post_da_riciclare.get('Citta', 'Favara')}"
-    nuovo_link_yt = upload_youtube(youtube, video_temp, titolo_yt, nuovo_testo)
+    nuovo_link_yt = upload_youtube(youtube, video_editato, titolo_yt, descrizione_short)
     
-    # Costruiamo una descrizione arricchita con i link dei social per Telegram
-    testo_tg = nuovo_testo
+    # ── INSTAGRAM REELS (Video CORTO 25s, descrizione con link)
+    fb_url_for_ig = LATEST_FB_VIDEO_DIRECT_URL if (nuovo_link_fb and nuovo_link_fb != "skip") else ""
+    if not fb_url_for_ig and url_fb_vecchio:
+        video_id_ex = extract_facebook_video_id(url_fb_vecchio)
+        if video_id_ex:
+            fb_url_for_ig = get_facebook_video_direct_url(video_id_ex)
+    
+    nuovo_link_ig = upload_instagram_reel(video_editato, descrizione_short, fb_video_url=fb_url_for_ig)
+
+    # ── THREADS (Video CORTO 25s, descrizione con link)
+    nuovo_link_threads = upload_threads(video_editato, descrizione_short, fb_video_url=fb_url_for_ig)
+
+    # ── TELEGRAM (Video CORTO 25s, descrizione con link)
+    testo_tg = descrizione_short
     link_social_tg = []
-    if nuovo_link_yt and nuovo_link_yt != "skip":
+    if nuovo_link_yt and nuovo_link_yt not in ("skip", ""):
         link_social_tg.append(f"📺 YouTube: {nuovo_link_yt}")
-    if nuovo_link_fb and nuovo_link_fb != "skip":
+    if nuovo_link_fb and nuovo_link_fb not in ("skip", ""):
         link_social_tg.append(f"📘 Facebook: {nuovo_link_fb}")
+    if nuovo_link_ig and nuovo_link_ig not in ("skip", ""):
+        link_social_tg.append(f"📸 Instagram: {nuovo_link_ig}")
+    if nuovo_link_threads and nuovo_link_threads not in ("skip", ""):
+        link_social_tg.append(f"🧵 Threads: {nuovo_link_threads}")
+        
     if link_social_tg:
         testo_tg += "\n\n🔗 *Guarda anche su:* \n" + "\n".join(link_social_tg)
         
-    send_telegram(video_temp, testo_tg, channel=False)
+    send_telegram(video_editato, testo_tg, channel=False)
 
     col_pubblicato_idx = headers.index("Pubblicato") + 1
     sheet.update_cell(riga_foglio_originale, col_pubblicato_idx, "RICICLATO")
@@ -897,8 +928,9 @@ def ricicla_post():
     sheet.append_row(nuova_riga)
     print(f"📝 Nuova riga aggiunta per il riciclo futuro.")
 
-    if os.path.exists(video_temp):
-        os.remove(video_temp)
+    for f in [video_temp, video_editato]:
+        if f and os.path.exists(f):
+            os.remove(f)
 
 
 # ═══════════════════════════════════════════
