@@ -1675,9 +1675,9 @@ def invia_telegram_foto(foto_files, caption):
         return False
 
 
-def pipeline_post_automatico():
+def pipeline_post_automatico(forza_id=None):
     """Esegue la pubblicazione bisettimanale di un annuncio attivo dall'elenco AUTO_POST_IMMOBILI."""
-    print("🚀 Avvio della pipeline AUTO-POST BISETTIMANALE...")
+    print(f"🚀 Avvio della pipeline AUTO-POST BISETTIMANALE... (forza_id: {forza_id})")
     try:
         gc, _ = get_google_services()
         try:
@@ -1730,17 +1730,26 @@ def pipeline_post_automatico():
             print("⚠️ Nessun immobile attivo da pubblicare in AUTO_POST_IMMOBILI")
             return
             
-        # Scegli l'immobile con la data ULTIMO_POST più vecchia o vuota (rotazione)
-        def sort_key(x):
-            if not x["ultimo_post"]:
-                return datetime.min
-            try:
-                return datetime.strptime(x["ultimo_post"], "%d/%m/%Y %H:%M")
-            except Exception:
-                return datetime.max
-                
-        attivi.sort(key=sort_key)
-        scelto = attivi[0]
+        # Scegli l'immobile specificato o esegui la rotazione classica
+        scelto = None
+        if forza_id:
+            forza_imm = [x for x in attivi if x["id"].strip().upper() == forza_id.strip().upper()]
+            if forza_imm:
+                scelto = forza_imm[0]
+            else:
+                print(f"❌ Immobile specificato per forzatura autopost ({forza_id}) non trovato tra gli immobili attivi")
+                return
+        else:
+            def sort_key(x):
+                if not x["ultimo_post"]:
+                    return datetime.min
+                try:
+                    return datetime.strptime(x["ultimo_post"], "%d/%m/%Y %H:%M")
+                except Exception:
+                    return datetime.max
+                    
+            attivi.sort(key=sort_key)
+            scelto = attivi[0]
         
         print(f"🎯 Immobile scelto: {scelto['id']} - {scelto['tipo']} a {scelto['indirizzo']} (Ultimo post: {scelto['ultimo_post'] or 'Mai'})")
         
@@ -1852,9 +1861,13 @@ def main():
     ha_parametri = bool(INPUT_VIDEO_URL or INPUT_JOB_ID)
 
     if e_dispatch or ha_parametri:
-        if e_dispatch and not ha_parametri:
-            print("ℹ️  workflow_dispatch senza parametri → modalità NUOVO IMMOBILE (attendi parametri da DarIA)")
-        pipeline_nuovo_immobile()
+        if INPUT_JOB_ID and not INPUT_VIDEO_URL:
+            print(f"🎯 Forzatura pubblicazione Auto-Post delle foto per l'immobile ID: {INPUT_JOB_ID}")
+            pipeline_post_automatico(forza_id=INPUT_JOB_ID)
+        else:
+            if e_dispatch and not ha_parametri:
+                print("ℹ️  workflow_dispatch senza parametri → modalità NUOVO IMMOBILE (attendi parametri da DarIA)")
+            pipeline_nuovo_immobile()
     else:
         print("⏰ Avvio da CRON")
         # Controlla il giorno della settimana (1 = Martedì, 4 = Venerdì)
