@@ -763,8 +763,11 @@ def send_whatsapp_report(risultati, indirizzo):
     except Exception as e:
         print(f"⚠️ Errore WhatsApp report: {e}")
 
-    # Invio di sicurezza di backup anche su Telegram personale
-    if TELEGRAM_TOKEN and CHAT_ID:
+    # Invio di sicurezza di backup anche su Telegram personale (solo se non è un gruppo o canale e se differisce dal canale pubblico)
+    is_group_or_channel = str(CHAT_ID).startswith("-")
+    is_same_as_channel = str(CHAT_ID) == str(TELEGRAM_CHANNEL_ID)
+    
+    if TELEGRAM_TOKEN and CHAT_ID and not is_group_or_channel and not is_same_as_channel:
         try:
             print("🟢 Invio report Telegram di sicurezza al Boss...")
             tg_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -774,6 +777,8 @@ def send_whatsapp_report(risultati, indirizzo):
             print("✅ Report Telegram inviato con successo!")
         except Exception as etg:
             print(f"⚠️ Errore invio report di sicurezza Telegram: {etg}")
+    else:
+        print("⏭️ Backup Report Telegram saltato (CHAT_ID coincide con il canale o è un gruppo pubblico)")
 
 
 def callback_daria(url, payload):
