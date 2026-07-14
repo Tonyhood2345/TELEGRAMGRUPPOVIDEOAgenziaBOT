@@ -36,7 +36,7 @@ on:
         required: false
         default: '{}'
   schedule:
-    - cron: '0 8 * * *'
+    - cron: '30 10 * * 2,5'
 
 jobs:
   run-bot:
