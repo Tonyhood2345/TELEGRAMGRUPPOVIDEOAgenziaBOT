@@ -19,7 +19,8 @@ import re
 from google.oauth2.service_account import Credentials
 from google.oauth2.credentials import Credentials as OauthCredentials
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
+import io
 from datetime import datetime
 
 # ═══════════════════════════════════════════
@@ -1397,6 +1398,446 @@ def aggiorna_catalogo_ia_wordpress():
         print(f"❌ Eccezione durante la sincronizzazione del catalogo IA: {e}")
 
 
+# ═══════════════════════════════════════════
+# AUTOMAZIONE AUTO-POST AUTO_POST_IMMOBILI
+# ═══════════════════════════════════════════
+
+def get_drive_service():
+    """Ritorna l'oggetto service di Google Drive autenticato via Service Account."""
+    if not GOOGLE_SECRETS:
+        print("⚠️ Google Credentials mancanti per Drive Service")
+        return None
+    try:
+        info = json.loads(GOOGLE_SECRETS)
+        creds = Credentials.from_service_account_info(info, scopes=['https://www.googleapis.com/auth/drive'])
+        return build('drive', 'v3', credentials=creds)
+    except Exception as e:
+        print(f"❌ Errore inizializzazione Drive Service: {e}")
+        return None
+
+
+def download_foto_da_drive(drive_service, link_foto_drive):
+    """Scarica le prime 5 immagini da una cartella Drive e le rende temporaneamente pubbliche."""
+    if not drive_service:
+        return [], []
+    
+    # Estrae l'ID della cartella Drive
+    folder_id_match = re.search(r'[-\w]{25,}', link_foto_drive)
+    folder_id = folder_id_match.group(0) if folder_id_match else link_foto_drive
+    print(f"📁 Analisi cartella Drive ID: {folder_id}")
+    
+    try:
+        # Elenca tutti i file per trovarne le immagini
+        query = f"'{folder_id}' in parents and trashed = false"
+        results = drive_service.files().list(q=query, fields="files(id, name, mimeType)", pageSize=40).execute()
+        files = results.get('files', [])
+        
+        image_files = []
+        for f in files:
+            mime = f.get('mimeType', '').lower()
+            if 'image' in mime:
+                image_files.append(f)
+        
+        if not image_files:
+            print("⚠️ Nessuna immagine trovata nella cartella Drive")
+            return [], []
+            
+        print(f"📸 Trovate {len(image_files)} immagini. Scarico le prime 5...")
+        local_paths = []
+        drive_urls = []
+        
+        os.makedirs("temp_foto", exist_ok=True)
+        
+        for idx, img in enumerate(image_files[:5]):
+            file_id = img['id']
+            file_name = img['name']
+            ext = os.path.splitext(file_name)[1] or ".jpg"
+            local_path = f"temp_foto/foto_{idx}{ext}"
+            
+            # 1. Rendi leggibile per tutti temporaneamente (per Instagram)
+            try:
+                drive_service.permissions().create(
+                    fileId=file_id,
+                    body={'role': 'reader', 'type': 'anyone'},
+                    fields='id'
+                ).execute()
+                public_url = f"https://docs.google.com/uc?export=download&id={file_id}"
+                drive_urls.append(public_url)
+            except Exception as ePerm:
+                print(f"⚠️ Impossibile rendere pubblico il file {file_id}: {ePerm}")
+                drive_urls.append(f"https://docs.google.com/uc?export=download&id={file_id}")
+            
+            # 2. Scarica localmente (per FB e Telegram)
+            request = drive_service.files().get_media(fileId=file_id)
+            fh = io.BytesIO()
+            downloader = MediaIoBaseDownload(fh, request)
+            done = False
+            while not done:
+                status, done = downloader.next_chunk()
+            
+            with open(local_path, "wb") as local_f:
+                local_f.write(fh.getvalue())
+            
+            local_paths.append(local_path)
+            print(f"   💾 Scaricata foto {idx+1}: {local_path}")
+            
+        return local_paths, drive_urls
+    except Exception as e:
+        print(f"❌ Errore download foto da Drive: {e}")
+        return [], []
+
+
+def upload_facebook_foto(foto_files, commento):
+    """Pubblica un post (singolo o carosello) con foto su Facebook Page."""
+    print("📘 Upload Foto Facebook Page...")
+    if not FB_PAGE_ID or not FB_PAGE_TOKEN:
+        print("⚠️ Facebook Page ID o Token mancanti")
+        return ""
+    
+    testo = commento + BRANDING
+    try:
+        # Se c'è una sola foto, pubblichiamo in modalità singola
+        if len(foto_files) == 1:
+            url = f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}/photos"
+            with open(foto_files[0], 'rb') as f:
+                r = requests.post(url, data={'access_token': FB_PAGE_TOKEN, 'caption': testo}, files={'source': f}, timeout=120)
+            if r.status_code == 200:
+                post_id = r.json().get('post_id', r.json().get('id', ''))
+                link = f"https://www.facebook.com/{post_id}"
+                print(f"✅ Post FB pubblicato con successo: {link}")
+                return link
+            else:
+                print(f"❌ Errore pubblicazione foto FB ({r.status_code}): {r.text}")
+                return ""
+        
+        # Se ci sono più foto, carichiamo le foto non pubblicate (published=false) e poi creiamo il post (feed) allegandole
+        media_ids = []
+        for file_path in foto_files:
+            url = f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}/photos"
+            with open(file_path, 'rb') as f:
+                r = requests.post(url, data={'access_token': FB_PAGE_TOKEN, 'published': 'false'}, files={'source': f}, timeout=120)
+            if r.status_code == 200:
+                media_ids.append(r.json().get('id'))
+            else:
+                print(f"⚠️ Errore caricamento foto FB temporanea ({r.status_code}): {r.text}")
+        
+        if not media_ids:
+            print("❌ Nessuna foto caricata su FB")
+            return ""
+            
+        # Pubblica il post
+        url_feed = f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}/feed"
+        attached_media = [{"media_fbid": m_id} for m_id in media_ids]
+        payload = {
+            'access_token': FB_PAGE_TOKEN,
+            'message': testo,
+            'attached_media': json.dumps(attached_media)
+        }
+        r = requests.post(url_feed, data=payload, timeout=60)
+        if r.status_code == 200:
+            post_id = r.json().get('id', '')
+            link = f"https://www.facebook.com/{post_id}"
+            print(f"✅ Carosello FB pubblicato con successo: {link}")
+            return link
+        else:
+            print(f"❌ Errore pubblicazione carosello FB ({r.status_code}): {r.text}")
+            return ""
+    except Exception as e:
+        print(f"❌ Errore Facebook Foto: {e}")
+        return ""
+
+
+def upload_instagram_foto(foto_urls, caption):
+    """Pubblica un post (singolo o carosello) con foto su Instagram Page."""
+    print("📸 Upload Foto Instagram...")
+    if not IG_USER_ID or not FB_PAGE_TOKEN:
+        print("⚠️ Instagram: IG_USER_ID o Token mancanti")
+        return ""
+        
+    testo = caption + BRANDING
+    try:
+        # Se c'è una sola foto, pubblichiamo come foto singola
+        if len(foto_urls) == 1:
+            url = f"https://graph.facebook.com/v21.0/{IG_USER_ID}/media"
+            payload = {
+                'image_url': foto_urls[0],
+                'caption': testo,
+                'access_token': FB_PAGE_TOKEN
+            }
+            r = requests.post(url, data=payload, timeout=60)
+            if r.status_code != 200:
+                print(f"❌ Errore creazione container IG ({r.status_code}): {r.text}")
+                return ""
+            container_id = r.json().get('id')
+            
+            # Pubblica
+            return pubblica_container_instagram(container_id)
+            
+        # Se ci sono più foto, creiamo gli elementi del carosello
+        children_ids = []
+        for img_url in foto_urls:
+            url = f"https://graph.facebook.com/v21.0/{IG_USER_ID}/media"
+            payload = {
+                'image_url': img_url,
+                'is_carousel_item': 'true',
+                'access_token': FB_PAGE_TOKEN
+            }
+            r = requests.post(url, data=payload, timeout=60)
+            if r.status_code == 200:
+                children_ids.append(r.json().get('id'))
+            else:
+                print(f"⚠️ Errore creazione item carosello IG ({r.status_code}): {r.text}")
+                
+        if not children_ids:
+            print("❌ Nessun item carosello creato su IG")
+            return ""
+            
+        # Crea container carosello padre
+        url_parent = f"https://graph.facebook.com/v21.0/{IG_USER_ID}/media"
+        payload_parent = {
+            'media_type': 'CAROUSEL',
+            'children': json.dumps(children_ids),
+            'caption': testo,
+            'access_token': FB_PAGE_TOKEN
+        }
+        r = requests.post(url_parent, data=payload_parent, timeout=60)
+        if r.status_code != 200:
+            print(f"❌ Errore creazione container carosello IG ({r.status_code}): {r.text}")
+            return ""
+        parent_container_id = r.json().get('id')
+        
+        # Pubblica carosello
+        return pubblica_container_instagram(parent_container_id)
+    except Exception as e:
+        print(f"❌ Errore Instagram Foto: {e}")
+        return ""
+
+
+def pubblica_container_instagram(container_id):
+    """Helper per fare il publish di un container IG e attendere la pubblicazione."""
+    url_publish = f"https://graph.facebook.com/v21.0/{IG_USER_ID}/media_publish"
+    # Attendiamo qualche secondo che IG elabori le foto
+    time.sleep(10)
+    for _ in range(6):
+        r = requests.post(url_publish, data={'creation_id': container_id, 'access_token': FB_PAGE_TOKEN}, timeout=60)
+        if r.status_code == 200:
+            post_id = r.json().get('id', '')
+            link = f"https://www.instagram.com/p/{post_id}"
+            print(f"✅ Instagram pubblicato con successo: {link}")
+            return link
+        else:
+            print(f"⏳ IG in elaborazione... riprovo ({r.status_code})")
+            time.sleep(10)
+    return ""
+
+
+def invia_telegram_foto(foto_files, caption):
+    """Invia le foto su Telegram Channel come gruppo multimediale o foto singola."""
+    print("✈️ Inviando foto su Telegram Channel...")
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHANNEL_ID:
+        print("⚠️ Telegram Token o Channel ID mancanti")
+        return False
+        
+    testo = caption + BRANDING
+    try:
+        if len(foto_files) == 1:
+            url = f"https://api.telegram.com/bot{TELEGRAM_TOKEN}/sendPhoto"
+            with open(foto_files[0], 'rb') as f:
+                r = requests.post(url, data={'chat_id': TELEGRAM_CHANNEL_ID, 'caption': testo, 'parse_mode': 'Markdown'}, files={'photo': f}, timeout=60)
+            return r.status_code == 200
+            
+        # Invio multiplo (Media Group)
+        url = f"https://api.telegram.com/bot{TELEGRAM_TOKEN}/sendMediaGroup"
+        files = {}
+        media = []
+        
+        for idx, file_path in enumerate(foto_files):
+            key = f"photo_{idx}"
+            files[key] = open(file_path, 'rb')
+            media_item = {
+                'type': 'photo',
+                'media': f"attach://{key}"
+            }
+            if idx == 0:
+                media_item['caption'] = testo
+                media_item['parse_mode'] = 'Markdown'
+            media.append(media_item)
+            
+        r = requests.post(url, data={'chat_id': TELEGRAM_CHANNEL_ID, 'media': json.dumps(media)}, files=files, timeout=90)
+        
+        # Chiudi i file
+        for f in files.values():
+            f.close()
+            
+        return r.status_code == 200
+    except Exception as e:
+        print(f"❌ Errore Telegram Foto: {e}")
+        return False
+
+
+def pipeline_post_automatico():
+    """Esegue la pubblicazione bisettimanale di un annuncio attivo dall'elenco AUTO_POST_IMMOBILI."""
+    print("🚀 Avvio della pipeline AUTO-POST BISETTIMANALE...")
+    try:
+        gc, _ = get_google_services()
+        try:
+            sh = gc.open_by_key("1s68pw0WEUcV0ZqltiahAqCp_r5rsycSjxKNh0VZQq_g")
+        except Exception:
+            sh = gc.open_by_key(SHEET_ID)
+            
+        try:
+            ws = sh.worksheet("AUTO_POST_IMMOBILI")
+        except Exception:
+            print("❌ Scheda AUTO_POST_IMMOBILI non trovata.")
+            return
+            
+        all_values = ws.get_all_values()
+        if len(all_values) <= 1:
+            print("⚠️ Nessun immobile presente nella scheda AUTO_POST_IMMOBILI")
+            return
+            
+        headers = [h.strip().upper() for h in all_values[0]]
+        
+        idx_id = headers.index("ID_IMMOBILE") if "ID_IMMOBILE" in headers else 0
+        idx_tipo = headers.index("TIPOLOGIA") if "TIPOLOGIA" in headers else 1
+        idx_prezzo = headers.index("PREZZO") if "PREZZO" in headers else 2
+        idx_indirizzo = headers.index("INDIRIZZO") if "INDIRIZZO" in headers else 3
+        idx_foto = headers.index("LINK_FOTO_DRIVE") if "LINK_FOTO_DRIVE" in headers else 4
+        idx_testo = 5 # Colonna F, indice 5 RIGOROSAMENTE!
+        idx_stato = headers.index("STATO") if "STATO" in headers else 6
+        idx_ultimo = headers.index("ULTIMO_POST") if "ULTIMO_POST" in headers else 7
+        
+        attivi = []
+        for r_idx, r in enumerate(all_values[1:], start=2):
+            r_len = len(r)
+            stato = r[idx_stato].strip().upper() if idx_stato < r_len else ""
+            descrizione = r[idx_testo].strip() if idx_testo < r_len else ""
+            
+            if stato == "ATTIVO" and descrizione:
+                ultimo_post = r[idx_ultimo].strip() if idx_ultimo < r_len else ""
+                attivi.append({
+                    "row_idx": r_idx,
+                    "id": r[idx_id].strip() if idx_id < r_len else "",
+                    "tipo": r[idx_tipo].strip() if idx_tipo < r_len else "Immobile",
+                    "prezzo": r[idx_prezzo].strip() if idx_prezzo < r_len else "",
+                    "indirizzo": r[idx_indirizzo].strip() if idx_indirizzo < r_len else "",
+                    "link_foto": r[idx_foto].strip() if idx_foto < r_len else "",
+                    "testo": descrizione,
+                    "ultimo_post": ultimo_post
+                })
+                
+        if not attivi:
+            print("⚠️ Nessun immobile attivo da pubblicare in AUTO_POST_IMMOBILI")
+            return
+            
+        # Scegli l'immobile con la data ULTIMO_POST più vecchia o vuota (rotazione)
+        def sort_key(x):
+            if not x["ultimo_post"]:
+                return datetime.min
+            try:
+                return datetime.strptime(x["ultimo_post"], "%d/%m/%Y %H:%M")
+            except Exception:
+                return datetime.max
+                
+        attivi.sort(key=sort_key)
+        scelto = attivi[0]
+        
+        print(f"🎯 Immobile scelto: {scelto['id']} - {scelto['tipo']} a {scelto['indirizzo']} (Ultimo post: {scelto['ultimo_post'] or 'Mai'})")
+        
+        # 1. Genera commento/caption con Groq
+        prompt_sys = (
+            "Sei Antonio Giancani, un perito ed esperto agente immobiliare a Favara. "
+            "Scrivi un post social (Facebook/Instagram) estremamente accattivante, coinvolgente ed emozionante per questo immobile in vendita. "
+            "Usa emoji appropriate per strutturare il testo in modo leggibile e attraente. "
+            "Non essere troppo lungo, concentrati sui punti di forza del servizio e dell'immobile. "
+            "Non inventare dati tecnici o dettagli non presenti nella descrizione. "
+            "IMPORTANTE: Non menzionare nomi di agenzie, fai risaltare solo Antonio Giancani. "
+            "Il post deve terminare tassativamente mettendo in forte risalto il nome 'Antonio Giancani' (es. '\\n\\n✨ Antonio Giancani')."
+        )
+        user_msg = f"Descrizione: {scelto['testo']}\nPrezzo: {scelto['prezzo']}\nIndirizzo: {scelto['indirizzo']}\nTipologia: {scelto['tipo']}"
+        
+        didascalia = callGroq(prompt_sys, user_msg)
+        if not didascalia or len(didascalia) < 10:
+            didascalia = f"Splendida opportunità! {scelto['tipo']} a {scelto['indirizzo']} al prezzo di {scelto['prezzo']}. Contattami per una visita!"
+            
+        if "Antonio Giancani" not in didascalia:
+            didascalia += "\n\n✨ Antonio Giancani"
+            
+        # 2. Scarica foto da Drive
+        drive_service = get_drive_service()
+        if not drive_service:
+            print("❌ Impossibile inizializzare Drive Service, aborto")
+            return
+            
+        foto_locali, foto_urls = download_foto_da_drive(drive_service, scelto["link_foto"])
+        if not foto_locali:
+            print("❌ Nessuna foto scaricata da Drive, aborto pubblicazione")
+            return
+            
+        # 3. Pubblica Facebook
+        link_fb = upload_facebook_foto(foto_locali, didascalia)
+        
+        # 4. Pubblica Instagram
+        link_ig = upload_instagram_foto(foto_urls, didascalia)
+        
+        # 5. Invia Telegram
+        invia_telegram_foto(foto_locali, didascalia)
+        
+        # 6. Aggiorna ULTIMO_POST sul foglio
+        ora_attuale = datetime.now().strftime("%d/%m/%Y %H:%M")
+        ws.update_cell(scelto["row_idx"], idx_ultimo + 1, ora_attuale)
+        print(f"📝 Cella aggiornata: Riga {scelto['row_idx']} colonna {idx_ultimo + 1} con valore {ora_attuale}")
+        
+        # 7. Pulisci foto locali
+        for fp in foto_locali:
+            try:
+                os.remove(fp)
+            except Exception:
+                pass
+        try:
+            os.rmdir("temp_foto")
+        except Exception:
+            pass
+            
+        # 8. Report al Boss
+        msg_report = (
+            f"📊 *REPORT AUTO-POST BISETTIMANALE DARIA*\n\n"
+            f"🎯 *Immobile:* {scelto['id']} ({scelto['tipo']})\n"
+            f"📍 *Indirizzo:* {scelto['indirizzo']}\n"
+            f"💰 *Prezzo:* {scelto['prezzo']}\n\n"
+            f"📘 *Facebook:* {f'✅ Pubblicato → {link_fb}' if link_fb else '❌ Errore'}\n"
+            f"📸 *Instagram:* {f'✅ Pubblicato → {link_ig}' if link_ig else '❌ Errore'}\n"
+            f"✈️ *Telegram:* ✅ Inviato\n\n"
+            f"✨ *Antonio Giancani*"
+        )
+        send_whatsapp_message_direct(BOSS_PHONE or CHAT_ID, msg_report)
+        print("✅ Pipeline auto-post completata con successo!")
+        
+    except Exception as e:
+        print(f"❌ Errore durante la pipeline auto-post: {e}")
+        try:
+            send_whatsapp_message_direct(BOSS_PHONE or CHAT_ID, f"⚠️ *Errore pipeline auto-post DarIA:* {e}")
+        except Exception:
+            pass
+
+
+def send_whatsapp_message_direct(chat_id, text):
+    """Metodo diretto per inviare un messaggio WhatsApp di testo usando le API Meta in bot.py."""
+    if not WHATSAPP_TOKEN or not WHATSAPP_PHONE_ID:
+        print("⚠️ WhatsApp: credenziali mancanti")
+        return False
+    url = f"https://graph.facebook.com/v18.0/{WHATSAPP_PHONE_ID}/messages"
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": chat_id,
+        "type": "text",
+        "text": {"body": text}
+    }
+    r = requests.post(url, headers=headers, json=payload, timeout=30)
+    return r.status_code == 200
+
+
 def main():
     print("🤖 Bot Pubblicazione Immobiliare — Avvio")
     print(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -1415,8 +1856,15 @@ def main():
             print("ℹ️  workflow_dispatch senza parametri → modalità NUOVO IMMOBILE (attendi parametri da DarIA)")
         pipeline_nuovo_immobile()
     else:
-        print("⏰ Avvio da CRON → modalità RICICLO POST")
-        ricicla_post()
+        print("⏰ Avvio da CRON")
+        # Controlla il giorno della settimana (1 = Martedì, 4 = Venerdì)
+        giorno = datetime.now().weekday()
+        if giorno in (1, 4):
+            print("🗓️ Giorno di AUTO-POST (Martedì/Venerdì) → Avvio pipeline_post_automatico()")
+            pipeline_post_automatico()
+        else:
+            print("🗓️ Giorno ordinario → Avvio riciclo_post()")
+            ricicla_post()
 
     # Sincronizza sempre il catalogo WordPress per l'ottimizzazione IA al termine
     aggiorna_catalogo_ia_wordpress()
