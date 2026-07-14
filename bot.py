@@ -179,31 +179,70 @@ def download_video(url, sorgente="Auto"):
     return None
 
 
-def edit_video(input_file, durata=30):
-    """Taglia il video a max 30 secondi e aggiunge watermark 'Antonio Giancani'."""
-    output = "video_editato.mp4"
-    print(f"🎬 Editing video: trim {durata}s + watermark Antonio Giancani")
+def get_video_duration(input_file):
+    """Recupera la durata del video usando ffprobe."""
     try:
+        comando = [
+            'ffprobe', '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            input_file
+        ]
+        res = subprocess.run(comando, capture_output=True, text=True, check=True)
+        return float(res.stdout.strip())
+    except Exception as e:
+        print(f"⚠️ Impossibile ottenere durata con ffprobe: {e}")
+        return 25.0
+
+
+def edit_video(input_file, durata=25):
+    """Taglia il video a max 25 secondi, aggiunge watermark 'Antonio Giancani',
+    sfuma a nero gli ultimi 3 secondi e aggiunge la scritta 'Continua... Link in descrizione'.
+    """
+    output = "video_editato.mp4"
+    print(f"🎬 Editing video: trim max {durata}s + watermark + fade out + testo finale")
+    try:
+        duration = get_video_duration(input_file)
+        target_duration = min(duration, float(durata))
+        fade_start = max(0.0, target_duration - 3.0)
+        fade_duration = target_duration - fade_start
+        
+        print(f"   ⏱️ Durata video: {duration:.2f}s | Target: {target_duration:.2f}s | Inizio sfumatura: {fade_start:.2f}s")
+        
+        vf_filter = (
+            "drawtext=text='Antonio Giancani'"
+            ":fontsize=24"
+            ":fontcolor=white"
+            ":x=w-tw-20"
+            ":y=h-th-20"
+            ":shadowx=2"
+            ":shadowy=2"
+            ":shadowcolor=black@0.7,"
+            "drawtext=text='Continua...\\nLink in descrizione'"
+            ":fontsize=32"
+            ":fontcolor=white"
+            ":x=(w-tw)/2"
+            ":y=(h-th)/2"
+            ":shadowx=2"
+            ":shadowy=2"
+            ":shadowcolor=black@0.7"
+            f":enable='between(t,{fade_start},{target_duration})',"
+            f"fade=t=out:st={fade_start}:d={fade_duration}"
+        )
+        
         comando = [
             'ffmpeg', '-y',
             '-i', input_file,
-            '-t', str(durata),
-            '-vf', (
-                "drawtext=text='Antonio Giancani'"
-                ":fontsize=24"
-                ":fontcolor=white"
-                ":x=w-tw-20"
-                ":y=h-th-20"
-                ":shadowx=2"
-                ":shadowy=2"
-                ":shadowcolor=black@0.7"
-            ),
+            '-t', str(target_duration),
+            '-vf', vf_filter,
+            '-af', f'afade=t=out:st={fade_start}:d={fade_duration}',
             '-c:v', 'libx264',
             '-preset', 'fast',
             '-c:a', 'aac',
             '-movflags', '+faststart',
             output
         ]
+        
         subprocess.run(comando, check=True, timeout=120)
         if os.path.exists(output):
             size_mb = os.path.getsize(output) / (1024 * 1024)
@@ -927,7 +966,7 @@ def pipeline_nuovo_immobile():
     # Strategia tollerante agli errori di download
     video_editato = None
     if video_file:
-        video_editato = edit_video(video_file, durata=30)
+        video_editato = edit_video(video_file, durata=25)
     else:
         print("⚠️ Attivazione modalità FALLBACK TESTUALE: Impossibile scaricare il file video, pubblico solo i testi su Telegram, Sito e Google Business.")
         risultati["status"] = "parziale"
@@ -936,9 +975,23 @@ def pipeline_nuovo_immobile():
         risultati["instagram"] = "skip (video non disponibile)"
         risultati["threads"] = "skip (video non disponibile)"
 
+    # Determina il link del video completo intero
+    full_video_link = ""
+    if INPUT_VIDEO_URL and "http" in INPUT_VIDEO_URL:
+        full_video_link = INPUT_VIDEO_URL
+    else:
+        yt_ex = existing.get("yt", "") or existing.get("youtube", "")
+        fb_ex = existing.get("fb", "") or existing.get("facebook", "")
+        full_video_link = yt_ex or fb_ex
+
+    # Costruiamo la descrizione che include il link del video intero per le piattaforme short
+    descrizione_short = INPUT_SEO_DESCRIPTION or "Nuova opportunità immobiliare"
+    if video_editato and full_video_link:
+        descrizione_short += f"\n\n🎥 Guarda il video completo: {full_video_link}"
+
     # ── FACEBOOK (richiede video)
     if not has_fb and video_editato:
-        risultati["facebook"] = upload_facebook(video_editato, INPUT_SEO_DESCRIPTION)
+        risultati["facebook"] = upload_facebook(video_editato, descrizione_short)
     elif not has_fb and not video_editato:
         risultati["facebook"] = "errore (video non disponibile)"
 
@@ -947,7 +1000,7 @@ def pipeline_nuovo_immobile():
         risultati["youtube"] = upload_youtube(
             youtube, video_editato,
             INPUT_SEO_TITLE or f"Immobile a {INPUT_INDIRIZZO}",
-            INPUT_SEO_DESCRIPTION or "Scopri questa opportunità immobiliare"
+            descrizione_short
         )
     elif not has_yt and not video_editato:
         risultati["youtube"] = "errore (video non disponibile)"
@@ -968,7 +1021,7 @@ def pipeline_nuovo_immobile():
 
         risultati["instagram"] = upload_instagram_reel(
             video_editato,
-            INPUT_SEO_DESCRIPTION or "Nuova opportunità immobiliare",
+            descrizione_short,
             fb_video_url=fb_url_for_ig
         )
     elif not has_ig and not video_editato:
@@ -990,7 +1043,7 @@ def pipeline_nuovo_immobile():
 
         risultati["threads"] = upload_threads(
             video_editato,
-            INPUT_SEO_DESCRIPTION or "Nuova opportunità immobiliare",
+            descrizione_short,
             fb_video_url=fb_url_for_threads
         )
     elif not has_threads and not video_editato:
@@ -998,7 +1051,7 @@ def pipeline_nuovo_immobile():
 
     # ── TELEGRAM (supporta sia video che testo semplice)
     if not has_tg:
-        descrizione_tg = INPUT_SEO_DESCRIPTION or "Nuova opportunità immobiliare"
+        descrizione_tg = descrizione_short
         
         link_social_tg = []
         yt_link = risultati.get("youtube") or existing.get("yt") or existing.get("youtube")
