@@ -85,7 +85,7 @@ def extract_frames(video_path, num_frames=18):
     for i in range(1, num_frames + 1):
         timestamp = i * interval
         out_filename = f"foto_temp_{i:02d}.jpg"
-        cmd = f'ffmpeg -y -ss {timestamp:.2f} -i "{video_path}" -vframes 1 -q:v 2 -s 1920x1080 "{out_filename}"'
+        cmd = f'ffmpeg -y -ss {timestamp:.2f} -i "{video_path}" -vframes 1 -q:v 2 "{out_filename}"'
         run_command(cmd)
         if os.path.exists(out_filename) and os.path.getsize(out_filename) > 0:
             extracted_files.append(out_filename)
@@ -179,7 +179,8 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
     gallery_html = "\n\n<h3>📸 Galleria Fotografica Immobile</h3>"
     gallery_html += '<div class="property-gallery-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:12px; margin-top:15px; margin-bottom:25px;">'
     for img_url in images_urls:
-        gallery_html += f'<div style="overflow:hidden; border-radius:12px; border:1px solid #e2e8f0;"><img src="{img_url}" style="width:100%; height:150px; object-fit:cover;" /></div>'
+        # Usiamo aspect-ratio quadrato (1/1) e object-fit cover per evitare che le foto vengano distorte o allungate
+        gallery_html += f'<div style="overflow:hidden; border-radius:12px; border:1px solid #e2e8f0; aspect-ratio:1/1;"><img src="{img_url}" style="width:100%; height:100%; object-fit:cover; display:block;" /></div>'
     gallery_html += '</div>'
     
     # Estrae video ID se è un link YouTube
@@ -194,7 +195,15 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
     if video_id:
         video_html = f'\n\n<h3>🎬 Video Visita Immobile</h3>\n<iframe width="100%" height="450" src="https://www.youtube.com/embed/{video_id}" frameborder="0" allowfullscreen style="border-radius:16px; box-shadow:0 10px 25px rgba(0,0,0,0.08);"></iframe>\n'
     
-    full_content = f"{content}\n{video_html}\n{gallery_html}"
+    # Logo ufficiale di Immobiliare Giancani in fondo al post
+    logo_html = (
+        '\n\n<div class="property-footer-logo" style="text-align:center; margin-top:40px; padding-top:20px; border-top:1px solid #e2e8f0;">\n'
+        '  <img src="https://www.immobiliaregiancani.it/wp-content/uploads/2025/12/cropped-casetta-330x180.png" alt="Immobiliare Giancani" style="max-width:180px; height:auto; margin:0 auto 10px auto; display:block;" />\n'
+        '  <strong style="font-family:\'Outfit\', sans-serif; font-size:16px; color:#1e293b; display:block;">✨ Immobiliare Giancani</strong>\n'
+        '</div>\n'
+    )
+    
+    full_content = f"{content}\n{video_html}\n{gallery_html}\n{logo_html}"
     
     args = {
         "rest_base": "property",
