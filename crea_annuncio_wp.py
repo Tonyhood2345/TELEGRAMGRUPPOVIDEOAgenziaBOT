@@ -5,8 +5,8 @@ import base64
 import subprocess
 import requests
 
-# === RECUPERO CONFIGURAZIONI DA VARIABILI D'AMBIENTE (SICUREZZA) ===
-WP_URL = os.environ.get("WP_URL", "https://www.immobiliaregiancani.it/wp-json/wp/v2")
+# === RECUPERO CONFIGURAZIONI DA VARIABILI D'AMBIENTE ===
+WP_URL = os.environ.get("WP_URL", "https://www.immobiliaregiancani.it/wp-json/easy-mcp-ai/v1/mcp")
 WP_TOKEN = os.environ.get("WP_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-70b-versatile")
@@ -16,6 +16,41 @@ if not WP_TOKEN:
     print("ATTENZIONE: Variabile d'ambiente WP_TOKEN non definita. Il caricamento su WordPress fallirà.")
 if not GROQ_API_KEY:
     print("ATTENZIONE: Variabile d'ambiente GROQ_API_KEY non definita. L'ottimizzazione con Groq LLM fallirà.")
+
+def call_mcp_tool(tool_name, arguments):
+    """Chiama un tool sul server MCP di WordPress usando JSON-RPC."""
+    headers = {
+        "Authorization": f"Bearer {WP_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": {
+            "name": tool_name,
+            "arguments": arguments
+        },
+        "id": 1
+    }
+    try:
+        # Chiamata POST all'endpoint unico dell'MCP
+        res = requests.post("https://www.immobiliaregiancani.it/wp-json/easy-mcp-ai/v1/mcp", headers=headers, json=payload, verify=False)
+        if res.status_code == 200:
+            res_json = res.json()
+            if 'result' in res_json and 'content' in res_json['result']:
+                text_data = res_json['result']['content'][0]['text']
+                # Se è un errore del server MCP
+                if text_data.startswith("Error:"):
+                    print(f"Errore restituito dal tool MCP {tool_name}: {text_data}")
+                    return None
+                return json.loads(text_data)
+            else:
+                print(f"Risposta MCP non valida per {tool_name}: {res_json}")
+        else:
+            print(f"Errore HTTP server MCP {res.status_code} per {tool_name}: {res.text}")
+    except Exception as e:
+        print(f"Eccezione in call_mcp_tool ({tool_name}): {str(e)}")
+    return None
 
 def run_command(cmd):
     """Esegue un comando shell e restituisce l'output."""
@@ -50,7 +85,6 @@ def extract_frames(video_path, num_frames=18):
     for i in range(1, num_frames + 1):
         timestamp = i * interval
         out_filename = f"foto_temp_{i:02d}.jpg"
-        # Estrae un singolo frame alla posizione timestamp in risoluzione 1920x1080 con qualità eccellente (-q:v 2)
         cmd = f'ffmpeg -y -ss {timestamp:.2f} -i "{video_path}" -vframes 1 -q:v 2 -s 1920x1080 "{out_filename}"'
         run_command(cmd)
         if os.path.exists(out_filename) and os.path.getsize(out_filename) > 0:
@@ -120,44 +154,26 @@ def optimize_description_with_groq(original_title, original_desc):
         return f"{original_title}\n\n{original_desc}\n\n✨ Immobiliare Giancani"
 
 def upload_photo_to_wp(photo_path):
-    """Carica un file immagine su WordPress Media Library via REST API."""
-    if not WP_TOKEN:
-        print("Salto caricamento foto (Token WP mancante).")
-        return None, None
-        
-    url = f"{WP_URL}/media"
-    headers = {
-        "Authorization": f"Bearer {WP_TOKEN}",
-        "Content-Disposition": f'attachment; filename="{os.path.basename(photo_path)}"',
-        "Content-Type": "image/jpeg"
-    }
-    
+    """Carica un file immagine su WordPress Media Library via server MCP."""
     try:
         with open(photo_path, "rb") as f:
-            image_data = f.read()
-        res = requests.post(url, headers=headers, data=image_data, verify=False)
-        if res.status_code in [200, 201]:
-            res_json = res.json()
-            return res_json['id'], res_json['source_url']
-        else:
-            print(f"Errore caricamento media WP ({res.status_code}): {res.text}")
-            return None, None
+            content_b64 = base64.b64encode(f.read()).decode("utf-8")
+        
+        args = {
+            "file_content": content_b64,
+            "file_name": os.path.basename(photo_path),
+            "mime_type": "image/jpeg"
+        }
+        res_data = call_mcp_tool("wp_upload_media", args)
+        if res_data and 'id' in res_data:
+            return res_data['id'], res_data.get('source_url', res_data.get('link'))
     except Exception as e:
         print("Errore upload foto:", str(e))
-        return None, None
+    return None, None
 
 def create_wp_listing(title, content, featured_media_id, images_urls, video_url):
-    """Crea l'annuncio CPT property in WordPress con galleria immagini e video incorporato."""
-    if not WP_TOKEN:
-        print("Salto creazione annuncio (Token WP mancante).")
-        return None
-        
-    print("Creazione dell'annuncio su WordPress...")
-    url = f"{WP_URL}/property"
-    headers = {
-        "Authorization": f"Bearer {WP_TOKEN}",
-        "Content-Type": "application/json"
-    }
+    """Crea l'annuncio CPT property in WordPress con galleria immagini e video incorporato via MCP."""
+    print("Creazione dell'annuncio su WordPress via MCP...")
     
     # Costruisci galleria HTML in fondo all'annuncio
     gallery_html = "\n\n<h3>📸 Galleria Fotografica Immobile</h3>"
@@ -180,41 +196,45 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
     
     full_content = f"{content}\n{video_html}\n{gallery_html}"
     
-    payload = {
+    args = {
+        "rest_base": "property",
+        "item_id": 0,  # non necessario per la creazione, ma alcuni tool lo richiedono, passiamo 0
         "title": title,
         "content": full_content,
         "status": "publish",
         "featured_media": featured_media_id
     }
     
-    try:
-        res = requests.post(url, headers=headers, json=payload, verify=False)
-        if res.status_code in [200, 201]:
-            res_json = res.json()
-            return res_json['link']
-        else:
-            print(f"Errore creazione post WP ({res.status_code}): {res.text}")
-            return None
-    except Exception as e:
-        print("Errore creazione annuncio WP:", str(e))
-        return None
+    # In CPT creation su wp_create_cpt_item
+    res_data = call_mcp_tool("wp_create_cpt_item", args)
+    if res_data and 'link' in res_data:
+        return res_data['link']
+    return None
 
 def main():
     if len(sys.argv) < 2:
         print("Uso: python crea_annuncio_wp.py <URL_VIDEO_YOUTUBE>")
-        # Di default per il test di 1 annuncio ne mettiamo uno se non fornito
         video_url = "https://www.youtube.com/watch?v=Cq0wg0_OeGg"
     else:
         video_url = sys.argv[1]
         
     print(f"=== PIPELINE CREAZIONE ANNUNCIO DA VIDEO: {video_url} ===")
     
-    # 1. Download Video
-    print("Download video temporaneo...")
+    # 1. Download Video (se non è già un link mp4 pre-caricato)
     video_filename = "video_annuncio_temp.mp4"
-    # Scarica in bassa/media qualità per velocizzare l'elaborazione (es. 720p max)
-    download_cmd = f'yt-dlp -f "best[height<=720]" -o "{video_filename}" "{video_url}"'
-    run_command(download_cmd)
+    if video_url.startswith("http") and ".mp4" in video_url:
+        print("Download video diretto da URL .mp4...")
+        try:
+            res = requests.get(video_url, verify=False)
+            with open(video_filename, "wb") as f:
+                f.write(res.content)
+        except Exception as e:
+            print("Errore download diretto video:", str(e))
+            return
+    else:
+        print("Download video via yt-dlp...")
+        download_cmd = f'yt-dlp -f "best" -o "{video_filename}" "{video_url}"'
+        run_command(download_cmd)
     
     if not os.path.exists(video_filename) or os.path.getsize(video_filename) == 0:
         print("Download del video fallito.")
@@ -233,10 +253,10 @@ def main():
         print("Estrazione fotogrammi fallita.")
         return
         
-    # 5. Caricamento immagini su WordPress
+    # 5. Caricamento immagini su WordPress via MCP
     media_ids = []
     media_urls = []
-    print(f"Caricamento di {len(photo_files)} immagini su WordPress...")
+    print(f"Caricamento di {len(photo_files)} immagini su WordPress via MCP...")
     for idx, photo in enumerate(photo_files):
         print(f"Caricamento {idx+1}/{len(photo_files)}: {photo}")
         m_id, m_url = upload_photo_to_wp(photo)
@@ -248,10 +268,9 @@ def main():
         print("Nessuna immagine caricata su WordPress, impossibile continuare.")
         return
         
-    # La prima foto estratta sarà la Featured Image
     featured_id = media_ids[0]
     
-    # 6. Crea l'annuncio property su WordPress
+    # 6. Crea l'annuncio property su WordPress via MCP
     wp_listing_link = create_wp_listing(orig_title, optimized_text, featured_id, media_urls, video_url)
     
     # 7. Pulizia file temporanei
