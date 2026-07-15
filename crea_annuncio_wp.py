@@ -160,8 +160,8 @@ def upload_photo_to_wp(photo_path):
             content_b64 = base64.b64encode(f.read()).decode("utf-8")
         
         args = {
-            "file_content": content_b64,
-            "file_name": os.path.basename(photo_path),
+            "content_base64": content_b64,
+            "filename": os.path.basename(photo_path),
             "mime_type": "image/jpeg"
         }
         res_data = call_mcp_tool("wp_upload_media", args)
