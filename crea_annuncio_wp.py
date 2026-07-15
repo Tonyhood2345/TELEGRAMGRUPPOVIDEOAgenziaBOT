@@ -487,7 +487,6 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         f"{description_html}\n"
         f"{mortgage_summary_html}\n"
         f"{ape_badge_html}\n"
-        f"{tech_sheet_html}\n"
         f"{map_html}\n"
         f"{geo_desc_html}\n"
         f"{video_html}\n"
