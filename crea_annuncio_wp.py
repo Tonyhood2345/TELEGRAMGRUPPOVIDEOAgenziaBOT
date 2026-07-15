@@ -192,7 +192,7 @@ def upload_photo_to_wp(photo_path):
     return None, None
 
 def create_wp_listing(title, content, featured_media_id, images_urls, video_url):
-    """Crea l'annuncio CPT property in WordPress con layout composto, mappa, APE e disattivazione sidebar."""
+    """Crea l'annuncio CPT property in WordPress con layout composto, mappa, APE, widget fluttuante DarIA e disattivazione sidebar."""
     print("Creazione dell'annuncio su WordPress via MCP...")
     
     # 1. Estrae classe energetica (APE) dal testo se presente, altrimenti default "E"
@@ -479,6 +479,68 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         '  <strong style="font-size:16px; color:#1e293b; display:block;">✨ Immobiliare Giancani</strong>\n'
         '</div>\n'
     )
+
+    # === SEZIONE 12: WIDGET FLUTTUANTE STICKY 'DARIA' ===
+    # Include il box fluttuante in basso a destra dello schermo, con pulsante per scroll al form contatti
+    daria_sticky_widget_html = (
+        f'\n<div id="daria-sticky-widget" style="position:fixed; bottom:80px; right:20px; width:300px; background:rgba(255, 255, 255, 0.88); backdrop-filter:blur(15px); -webkit-backdrop-filter:blur(15px); border:1px solid rgba(255,255,255,0.45); border-radius:24px; box-shadow:0 15px 35px rgba(0,0,0,0.15); padding:18px; z-index:99999; font-family:\'Outfit\', sans-serif; transition:all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); transform-origin:bottom right;">\n'
+        f'  <style>\n'
+        f'    #daria-sticky-widget:hover {{\n'
+        f'      transform: translateY(-5px);\n'
+        f'      box-shadow: 0 20px 40px rgba(0,0,0,0.18);\n'
+        f'    }}\n'
+        f'    .daria-pulse-ring {{\n'
+        f'      position: absolute;\n'
+        f'      top: -2px;\n'
+        f'      left: -2px;\n'
+        f'      width: 58px;\n'
+        f'      height: 58px;\n'
+        f'      border: 3px solid #10b981;\n'
+        f'      border-radius: 50%;\n'
+        f'      animation: daria-pulse 2s infinite;\n'
+        f'    }}\n'
+        f'    @keyframes daria-pulse {{\n'
+        f'      0% {{ transform: scale(0.95); opacity: 0.8; }}\n'
+        f'      50% {{ transform: scale(1.08); opacity: 0.3; }}\n'
+        f'      100% {{ transform: scale(1.15); opacity: 0; }}\n'
+        f'    }}\n'
+        f'    .daria-btn-action {{\n'
+        f'      transition: all 0.2s ease;\n'
+        f'    }}\n'
+        f'    .daria-btn-action:hover {{\n'
+        f'      transform: translateY(-2px);\n'
+        f'      filter: brightness(1.05);\n'
+        f'    }}\n'
+        f'  </style>\n'
+        f'  <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px; position:relative;">\n'
+        f'    <div style="position:relative; width:54px; height:54px;">\n'
+        f'      <div class="daria-pulse-ring"></div>\n'
+        f'      <img id="daria-avatar-img" src="https://www.immobiliaregiancani.it/wp-content/uploads/2026/07/daria_avatar_placeholder.png" onerror="this.src=\'https://cdn-icons-png.flaticon.com/512/4712/4712109.png\'" style="width:100%; height:100%; border-radius:50%; object-fit:cover; border:2px solid #ffffff; box-shadow:0 3px 8px rgba(0,0,0,0.1); position:relative; z-index:2; background:#f1f5f9;" alt="DarIA" />\n'
+        f'      <span style="position:absolute; bottom:0; right:0; width:12px; height:12px; background:#10b981; border:2px solid #ffffff; border-radius:50%; z-index:3;"></span>\n'
+        f'    </div>\n'
+        f'    <div style="flex-grow:1;">\n'
+        f'      <h4 style="margin:0; font-size:15px; color:#0f172a; font-weight:800; display:flex; align-items:center; gap:5px;">DarIA <span style="font-size:10px; background:#e0f2fe; color:#0369a1; padding:1px 5px; border-radius:10px; font-weight:700;">Online</span></h4>\n'
+        f'      <span style="font-size:11px; color:#64748b; font-weight:500;">Consulente Virtuale</span>\n'
+        f'    </div>\n'
+        f'    <button onclick="document.getElementById(\'daria-sticky-widget\').style.display=\'none\'" style="background:none; border:0; color:#94a3b8; cursor:pointer; font-size:18px; font-weight:700; padding:5px; line-height:1;">&times;</button>\n'
+        f'  </div>\n'
+        f'  <p style="margin:0 0 12px 0; font-size:12px; color:#475569; line-height:1.4;">\n'
+        f'    Sarei lieta di aiutarti a fissare un appuntamento o darti informazioni su questa casa!\n'
+        f'  </p>\n'
+        f'  <div style="display:flex; flex-direction:column; gap:6px;">\n'
+        f'    <button onclick="document.getElementById(\'info-form\').scrollIntoView({{behavior: \'smooth\'}})" class="daria-btn-action" style="width:100%; background:linear-gradient(135deg, #3b82f6, #1d4ed8); color:#ffffff; border:0; padding:9px; border-radius:10px; font-size:12px; font-weight:700; cursor:pointer; text-align:center; display:flex; align-items:center; justify-content:center; gap:5px;">\n'
+        f'      🗓️ Fissa un Appuntamento\n'
+        f'    </button>\n'
+        f'    <a href="https://wa.me/393505902923?text=Salve%20DarIA%2C%20vorrei%20informazioni%20su%20questo%20annuncio%20su%20Immobiliare%20Giancani" target="_blank" class="daria-btn-action" style="text-decoration:none; width:100%; background:#25d366; color:#ffffff; padding:9px; border-radius:10px; font-size:12px; font-weight:700; text-align:center; display:flex; align-items:center; justify-content:center; gap:5px;">\n'
+        f'      💬 Scrivimi su WhatsApp\n'
+        f'    </a>\n'
+        f'    <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">\n'
+        f'      <a href="tel:+393201667156" class="daria-btn-action" style="text-decoration:none; background:#0284c7; color:#ffffff; padding:8px; border-radius:10px; font-size:11px; font-weight:700; text-align:center;">📞 Chiama</a>\n'
+        f'      <a href="https://t.me/immobiliaregiancani" target="_blank" class="daria-btn-action" style="text-decoration:none; background:#22d3ee; color:#ffffff; padding:8px; border-radius:10px; font-size:11px; font-weight:700; text-align:center;">✈️ Telegram</a>\n'
+        f'    </div>\n'
+        f'  </div>\n'
+        f'</div>\n'
+    )
     
     # === ABBINAMENTO ELEMENTI NEL NUOVO ORDINE RICHIESTO ===
     full_content = (
@@ -494,7 +556,8 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         f"{mortgage_calculator_html}\n"
         f"{contact_box_html}\n"
         f"{social_channels_html}\n"
-        f"{logo_html}"
+        f"{logo_html}\n"
+        f"{daria_sticky_widget_html}"
     )
     
     # === FORZATURA LARGHEZZA PIENA (RIMOZIONE SIDEBAR ASTRA) VIA META ===
