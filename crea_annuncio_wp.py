@@ -4,12 +4,15 @@ import json
 import base64
 import subprocess
 import requests
+import re
+import urllib.parse
 
 # === RECUPERO CONFIGURAZIONI DA VARIABILI D'AMBIENTE ===
 WP_URL = os.environ.get("WP_URL", "https://www.immobiliaregiancani.it/wp-json/easy-mcp-ai/v1/mcp")
 WP_TOKEN = os.environ.get("WP_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama3-70b-8192")
+PROPERTY_ADDRESS = os.environ.get("INPUT_INDIRIZZO", "")
 
 # Verifiche di sicurezza iniziali
 if not WP_TOKEN:
@@ -33,13 +36,11 @@ def call_mcp_tool(tool_name, arguments):
         "id": 1
     }
     try:
-        # Chiamata POST all'endpoint unico dell'MCP
         res = requests.post("https://www.immobiliaregiancani.it/wp-json/easy-mcp-ai/v1/mcp", headers=headers, json=payload, verify=False)
         if res.status_code == 200:
             res_json = res.json()
             if 'result' in res_json and 'content' in res_json['result']:
                 text_data = res_json['result']['content'][0]['text']
-                # Se è un errore del server MCP
                 if text_data.startswith("Error:"):
                     print(f"Errore restituito dal tool MCP {tool_name}: {text_data}")
                     return None
@@ -71,7 +72,7 @@ def get_video_duration(video_path):
         return 0.0
 
 def extract_frames(video_path, num_frames=18):
-    """Estrae num_frames fotogrammi in HD (1920x1080) ad alta qualità a intervalli regolari."""
+    """Estrae fotogrammi in HD ad alta qualità mantenendo l'aspect ratio naturale."""
     duration = get_video_duration(video_path)
     if duration <= 0:
         print("Impossibile determinare la durata del video, estrazione fallita.")
@@ -80,11 +81,12 @@ def extract_frames(video_path, num_frames=18):
     interval = duration / (num_frames + 1)
     extracted_files = []
     
-    print(f"Durata video: {duration} secondi. Estrazione di {num_frames} fotogrammi a intervalli di {interval:.2f}s...")
+    print(f"Durata video: {duration:.2f}s. Estrazione di {num_frames} fotogrammi mantenendo l'aspect ratio...")
     
     for i in range(1, num_frames + 1):
         timestamp = i * interval
         out_filename = f"foto_temp_{i:02d}.jpg"
+        # Rimosso -s 1920x1080 per preservare l'aspect ratio originale del video
         cmd = f'ffmpeg -y -ss {timestamp:.2f} -i "{video_path}" -vframes 1 -q:v 2 "{out_filename}"'
         run_command(cmd)
         if os.path.exists(out_filename) and os.path.getsize(out_filename) > 0:
@@ -111,7 +113,7 @@ def get_video_metadata(video_url):
     return title, desc
 
 def optimize_description_with_groq(original_title, original_desc):
-    """Usa Groq LLM per riscrivere e ottimizzare la descrizione per SEO e GEO."""
+    """Usa Groq LLM per riscrivere e ottimizzare la descrizione con stile prestigioso e senza date."""
     if not GROQ_API_KEY:
         print("Salto ottimizzazione Groq (Chiave mancante).")
         return f"{original_title}\n\n{original_desc}\n\n✨ Immobiliare Giancani"
@@ -119,13 +121,15 @@ def optimize_description_with_groq(original_title, original_desc):
     print("Ottimizzazione testo con Groq...")
     
     prompt_system = (
-        "Sei un copywriter professionista nel settore immobiliare italiano d'élite. "
-        "Lavori per Immobiliare Giancani. Il tuo compito è ottimizzare la descrizione "
-        "di un annuncio immobiliare per la ricerca SEO e GEO locale (specializzandoti su Favara, Agrigento e provincia in Sicilia). "
-        "Riscrivi il testo in modo irresistibile per i clienti, usa parole chiave come 'appartamento in vendita', 'casa con giardino', "
-        "'investimento Favara', inserisci emoticon ed elenchi puntati per facilitare la lettura. "
-        "IMPORTANTE: Ogni output generato deve SEMPRE terminare mettendo in risalto la firma '✨ Immobiliare Giancani' "
-        "in fondo con spaziatura doppia. Il nome 'Antonio' NON deve comparire da nessuna parte del testo."
+        "Sei un broker immobiliare d'élite e copywriter professionista per Immobiliare Giancani. "
+        "Il tuo compito è ottimizzare la descrizione dell'annuncio per renderla prestigiosa, elegante, persuasiva e professionale. "
+        "Focalizzati sulla SEO e GEO locale per la provincia di Agrigento (specialmente Favara). "
+        "Usa parole chiave raffinate come 'prestigiosa residenza', 'investimento sicuro', 'ambienti luminosi e ben distribuiti', 'comfort abitativo'. "
+        "Organizza il testo con elenchi puntati ed emoji eleganti per favorire la leggibilità. "
+        "IMPORTANTE: Non includere MAI date di pubblicazione, scadenze o indicazioni temporali passate (es. '2026', 'febbraio 2026', 'da due mesi', ecc.) "
+        "per evitare di far capire da quanto tempo l'immobile è in vendita sul mercato. "
+        "Il testo generato deve sempre terminare con la firma '✨ Immobiliare Giancani' in fondo con spaziatura doppia. "
+        "Il nome 'Antonio' NON deve comparire in nessuna parte del testo."
     )
     
     user_content = f"Titolo originale: {original_title}\n\nDescrizione originale:\n{original_desc}"
@@ -172,7 +176,7 @@ def upload_photo_to_wp(photo_path):
     return None, None
 
 def create_wp_listing(title, content, featured_media_id, images_urls, video_url):
-    """Crea l'annuncio CPT property in WordPress con galleria immagini, video, dettagli GEO, contatti e planimetria via MCP."""
+    """Crea l'annuncio CPT property in WordPress con layout ricco, APE animata, social e mappa sfocata."""
     print("Creazione dell'annuncio su WordPress via MCP...")
     
     # 1. Estrae classe energetica (APE) dal testo se presente, altrimenti default "E"
@@ -183,24 +187,92 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
             ape_class = letter.upper()
             break
             
-    # 2. Costruisci il box delle caratteristiche tecniche (APE, ecc.)
+    # 2. Generazione Mappa con raggio di 1 km per la privacy o mappa agenzia
+    if PROPERTY_ADDRESS:
+        # Per privacy mostriamo la via ma senza il numero civico (raggio indicativo)
+        approx_address = re.sub(r'\b\d+\b', '', PROPERTY_ADDRESS).strip()
+        approx_address = re.sub(r'\s*,\s*', ', ', approx_address)
+        if "favara" not in approx_address.lower():
+            approx_address += ", Favara (AG)"
+        
+        map_url = f"https://maps.google.com/maps?q={urllib.parse.quote(approx_address)}&t=&z=14&ie=UTF8&iwloc=&output=embed"
+        map_title = "📍 Mappa: Zona indicativa dell'immobile (Raggio di 1 km per privacy)"
+    else:
+        agency_address = "Corso Vittorio Veneto 151, Favara (AG)"
+        map_url = f"https://maps.google.com/maps?q={urllib.parse.quote(agency_address)}&t=&z=16&ie=UTF8&iwloc=&output=embed"
+        map_title = "📍 La nostra sede - Immobiliare Giancani"
+        
+    map_html = (
+        f'\n\n<div class="property-map-section" style="margin-bottom:25px; border-radius:16px; overflow:hidden; border:1px solid #e2e8f0;">\n'
+        f'  <div style="background:#f8fafc; padding:12px 20px; border-bottom:1px solid #e2e8f0; font-family:\'Outfit\', sans-serif; font-weight:700; font-size:15px; color:#0f172a;">\n'
+        f'    {map_title}\n'
+        f'  </div>\n'
+        f'  <iframe src="{map_url}" width="100%" height="300" style="border:0; display:block;" allowfullscreen="" loading="lazy"></iframe>\n'
+        f'</div>\n'
+    )
+
+    # 3. Costruisci il badge APE colorato ed animato
+    ape_colors = {
+        "A": "#10b981", # Verde smeraldo
+        "B": "#34d399", # Verde chiaro
+        "C": "#a7f3d0", # Verde acqua
+        "D": "#fbbf24", # Giallo ambra
+        "E": "#f97316", # Arancione
+        "F": "#ef4444", # Rosso
+        "G": "#b91c1c"  # Rosso scuro
+    }
+    
+    ape_color = ape_colors.get(ape_class, "#f97316")
+    r = int(ape_color[1:3], 16)
+    g = int(ape_color[3:5], 16)
+    b = int(ape_color[5:7], 16)
+    
+    ape_badge_html = (
+        f'\n\n<div class="ape-badge-wrapper" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:16px; padding:20px; margin-top:25px; margin-bottom:25px; font-family:\'Outfit\', sans-serif;">\n'
+        f'  <style>\n'
+        f'    @keyframes pulse-ape {{\n'
+        f'      0% {{ transform: scale(1); box-shadow: 0 0 0 0 rgba({r},{g},{b}, 0.6); }}\n'
+        f'      70% {{ transform: scale(1.02); box-shadow: 0 0 0 10px rgba({r},{g},{b}, 0); }}\n'
+        f'      100% {{ transform: scale(1); box-shadow: 0 0 0 0 rgba({r},{g},{b}, 0); }}\n'
+        f'    }}\n'
+        f'    .ape-highlight-badge {{\n'
+        f'      animation: pulse-ape 2.5s infinite;\n'
+        f'    }}\n'
+        f'  </style>\n'
+        f'  <div style="font-weight: 700; font-size: 15px; color: #475569; margin-bottom: 12px;">Certificazione Energetica (APE)</div>\n'
+        f'  <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">\n'
+        f'    <div class="ape-highlight-badge" style="background:{ape_color}; color:#ffffff; padding:10px 20px; font-size:18px; font-weight:900; border-radius:12px; display:inline-block; text-align:center; min-width:110px; text-shadow:1px 1px 2px rgba(0,0,0,0.2);">\n'
+        f'      CLASSE {ape_class}\n'
+        f'    </div>\n'
+        f'    <div style="flex-grow:1; display:flex; gap:3px; height:28px; background:#e2e8f0; padding:3px; border-radius:10px; align-items:stretch; min-width:240px;">\n'
+    )
+    
+    for c, color in ape_colors.items():
+        is_active = (c == ape_class)
+        opacity = "1" if is_active else "0.3"
+        border_style = f"border: 2px solid #0f172a; transform: scale(1.05);" if is_active else ""
+        ape_badge_html += f'      <div style="flex:1; background:{color}; border-radius:6px; display:flex; align-items:center; justify-content:center; color:#ffffff; font-size:11px; font-weight:900; opacity:{opacity}; {border_style}">{c}</div>\n'
+        
+    ape_badge_html += (
+        '    </div>\n'
+        '  </div>\n'
+        '</div>\n'
+    )
+            
+    # 4. Box delle caratteristiche tecniche
     tech_sheet_html = (
-        '\n\n<div class="property-tech-sheet" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:16px; padding:20px; margin-top:25px; margin-bottom:25px;">\n'
-        '  <h3 style="font-family:\'Outfit\', sans-serif; font-size:20px; color:#0f172a; margin-top:0; margin-bottom:15px; border-bottom:2px solid #e2e8f0; padding-bottom:8px;">📋 Scheda Tecnica e Prestazioni</h3>\n'
+        '\n\n<div class="property-tech-sheet" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:16px; padding:20px; margin-bottom:25px;">\n'
+        '  <h3 style="font-family:\'Outfit\', sans-serif; font-size:20px; color:#0f172a; margin-top:0; margin-bottom:15px; border-bottom:2px solid #e2e8f0; padding-bottom:8px;">📋 Scheda Tecnica</h3>\n'
         '  <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:15px;">\n'
-        '    <div><span style="color:#64748b; font-size:13px; display:block;">Classe Energetica (APE)</span>'
-        f'         <strong style="font-size:16px; color:#1e293b;">Classe {ape_class}</strong></div>\n'
-        '    <div><span style="color:#64748b; font-size:13px; display:block;">Stato Immobile</span>'
-        '         <strong style="font-size:16px; color:#1e293b;">Selezionato / Nuova Proposta</strong></div>\n'
-        '    <div><span style="color:#64748b; font-size:13px; display:block;">Localizzazione</span>'
-        '         <strong style="font-size:16px; color:#1e293b;">Favara (Agrigento)</strong></div>\n'
-        '    <div><span style="color:#64748b; font-size:13px; display:block;">Sito Agenzia</span>'
-        '         <strong style="font-size:16px; color:#1e293b;">Immobiliare Giancani</strong></div>\n'
+        f'    <div><span style="color:#64748b; font-size:13px; display:block;">Classe Energetica (APE)</span><strong style="font-size:16px; color:#1e293b;">Classe {ape_class}</strong></div>\n'
+        '    <div><span style="color:#64748b; font-size:13px; display:block;">Stato Immobile</span><strong style="font-size:16px; color:#1e293b;">Selezionato / Nuova Proposta</strong></div>\n'
+        '    <div><span style="color:#64748b; font-size:13px; display:block;">Localizzazione</span><strong style="font-size:16px; color:#1e293b;">Favara (Agrigento)</strong></div>\n'
+        '    <div><span style="color:#64748b; font-size:13px; display:block;">Sito Agenzia</span><strong style="font-size:16px; color:#1e293b;">Immobiliare Giancani</strong></div>\n'
         '  </div>\n'
         '</div>\n'
     )
     
-    # 3. Costruisci la descrizione GEO di Favara
+    # 5. Descrizione GEO di Favara
     geo_desc_html = (
         '\n\n<div class="property-geo-desc" style="background:#f1f5f9; border-radius:16px; padding:20px; margin-bottom:25px;">\n'
         '  <h4 style="font-family:\'Outfit\', sans-serif; font-size:18px; color:#0f172a; margin-top:0; margin-bottom:10px;">📍 Vivere a Favara: Qualità e Collegamenti</h4>\n'
@@ -210,7 +282,7 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         '</div>\n'
     )
     
-    # 4. Spazio Planimetria
+    # 6. Spazio Planimetria
     planimetry_html = (
         '\n\n<div class="property-planimetry-section" style="margin-bottom:25px; padding:25px; border:2px dashed #cbd5e1; border-radius:16px; background:#f8fafc; text-align:center;">\n'
         '  <span style="font-size:36px; display:block; margin-bottom:8px;">📐</span>\n'
@@ -220,9 +292,9 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         '</div>\n'
     )
     
-    # 5. Box Richiesta Informazioni e Contatti (WhatsApp, Telegram, Call)
+    # 7. Box Richiesta Informazioni e Contatti (WhatsApp, Telegram, Call)
     contact_box_html = (
-        '\n\n<div class="property-contact-box" style="background:linear-gradient(135deg, #1e293b, #0f172a); border-radius:20px; padding:25px; color:#ffffff; margin-bottom:30px; box-shadow:0 10px 25px rgba(0,0,0,0.15);">\n'
+        '\n\n<div class="property-contact-box" style="background:linear-gradient(135deg, #1e293b, #0f172a); border-radius:20px; padding:25px; color:#ffffff; margin-bottom:25px; box-shadow:0 10px 25px rgba(0,0,0,0.15);">\n'
         '  <h3 style="font-family:\'Outfit\', sans-serif; font-size:20px; color:#ffffff; margin-top:0; margin-bottom:8px; text-align:center;">📞 Richiedi Informazioni o Prenota una Visita</h3>\n'
         '  <p style="color:#94a3b8; font-size:14px; text-align:center; margin-top:0; margin-bottom:20px;">I consulenti di Immobiliare Giancani sono a tua completa disposizione per fornirti tutti i dettagli.</p>\n'
         '  <div style="display:flex; flex-wrap:wrap; gap:12px; justify-content:center; margin-bottom:20px;">\n'
@@ -236,14 +308,28 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         '</div>\n'
     )
     
-    # 6. Costruisci galleria HTML
+    # 8. Box Canali Social / Pagine Video
+    social_channels_html = (
+        '\n\n<div class="property-social-channels" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:16px; padding:20px; margin-bottom:25px; text-align:center; font-family:\'Outfit\', sans-serif;">\n'
+        '  <h4 style="font-size:16px; color:#0f172a; margin-top:0; margin-bottom:12px; font-weight:700;">📺 Segui i Nostri Canali Social e Video</h4>\n'
+        '  <div style="display:flex; flex-wrap:wrap; gap:10px; justify-content:center;">\n'
+        '    <a href="https://www.youtube.com/@immobiliaregiancani" target="_blank" style="background:#ff0000; color:#ffffff; text-decoration:none; padding:8px 16px; border-radius:20px; font-size:12px; font-weight:700; display:inline-flex; align-items:center; gap:6px;">📺 YouTube</a>\n'
+        '    <a href="https://www.facebook.com/234931856561526" target="_blank" style="background:#1877f2; color:#ffffff; text-decoration:none; padding:8px 16px; border-radius:20px; font-size:12px; font-weight:700; display:inline-flex; align-items:center; gap:6px;">📘 Facebook</a>\n'
+        '    <a href="https://www.instagram.com/immobiliaregiancani/" target="_blank" style="background:#e1306c; color:#ffffff; text-decoration:none; padding:8px 16px; border-radius:20px; font-size:12px; font-weight:700; display:inline-flex; align-items:center; gap:6px;">📸 Instagram</a>\n'
+        '    <a href="https://www.threads.net/@immobiliaregiancani" target="_blank" style="background:#000000; color:#ffffff; text-decoration:none; padding:8px 16px; border-radius:20px; font-size:12px; font-weight:700; display:inline-flex; align-items:center; gap:6px;">🧵 Threads</a>\n'
+        '    <a href="https://www.tiktok.com/@immobiliaregiancani" target="_blank" style="background:#010101; color:#ffffff; text-decoration:none; padding:8px 16px; border-radius:20px; font-size:12px; font-weight:700; display:inline-flex; align-items:center; gap:6px;">🎵 TikTok</a>\n'
+        '  </div>\n'
+        '</div>\n'
+    )
+    
+    # 9. Costruisci galleria HTML
     gallery_html = "\n\n<h3>📸 Galleria Fotografica Immobile</h3>"
     gallery_html += '<div class="property-gallery-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:12px; margin-top:15px; margin-bottom:25px;">'
     for img_url in images_urls:
         gallery_html += f'<div style="overflow:hidden; border-radius:12px; border:1px solid #e2e8f0; aspect-ratio:1/1;"><img src="{img_url}" style="width:100%; height:100%; object-fit:cover; display:block;" /></div>'
     gallery_html += '</div>'
     
-    # 7. Video YouTube incorporato
+    # 10. Video YouTube incorporato
     video_id = ""
     if "youtube.com" in video_url or "youtu.be" in video_url:
         if "watch?v=" in video_url:
@@ -255,7 +341,7 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
     if video_id:
         video_html = f'\n\n<h3>🎬 Video Visita Immobile</h3>\n<iframe width="100%" height="450" src="https://www.youtube.com/embed/{video_id}" frameborder="0" allowfullscreen style="border-radius:16px; box-shadow:0 10px 25px rgba(0,0,0,0.08); margin-bottom:25px;"></iframe>\n'
     
-    # 8. Logo ufficiale di Immobiliare Giancani in fondo al post
+    # 11. Logo ufficiale di Immobiliare Giancani in fondo al post
     logo_html = (
         '\n\n<div class="property-footer-logo" style="text-align:center; margin-top:40px; padding-top:20px; border-top:1px solid #e2e8f0;">\n'
         '  <img src="https://www.immobiliaregiancani.it/wp-content/uploads/2025/12/cropped-casetta-330x180.png" alt="Immobiliare Giancani" style="max-width:180px; height:auto; margin:0 auto 10px auto; display:block;" />\n'
@@ -263,19 +349,18 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         '</div>\n'
     )
     
-    # Assembla contenuto
-    full_content = f"{content}\n{tech_sheet_html}\n{geo_desc_html}\n{video_html}\n{gallery_html}\n{planimetry_html}\n{contact_box_html}\n{logo_html}"
+    # Assembla contenuto finale in sequenza logica elegante
+    full_content = f"{content}\n{ape_badge_html}\n{tech_sheet_html}\n{geo_desc_html}\n{map_html}\n{video_html}\n{gallery_html}\n{planimetry_html}\n{contact_box_html}\n{social_channels_html}\n{logo_html}"
     
     args = {
         "rest_base": "property",
-        "item_id": 0,  # non necessario per la creazione, ma alcuni tool lo richiedono, passiamo 0
+        "item_id": 0,
         "title": title,
         "content": full_content,
         "status": "publish",
         "featured_media": featured_media_id
     }
     
-    # In CPT creation su wp_create_cpt_item
     res_data = call_mcp_tool("wp_create_cpt_item", args)
     if res_data and 'link' in res_data:
         return res_data['link']
@@ -290,7 +375,7 @@ def main():
         
     print(f"=== PIPELINE CREAZIONE ANNUNCIO DA VIDEO: {video_url} ===")
     
-    # 1. Download Video (se non è già un link mp4 pre-caricato)
+    # 1. Download Video
     video_filename = "video_annuncio_temp.mp4"
     if video_url.startswith("http") and ".mp4" in video_url:
         print("Download video diretto da URL .mp4...")
@@ -313,17 +398,25 @@ def main():
     # 2. Estrai metadata originali
     orig_title, orig_desc = get_video_metadata(video_url)
     
-    # 3. Ottimizza descrizione con Groq
-    optimized_text = optimize_description_with_groq(orig_title, orig_desc)
+    # 3. Pulisce date e trattini dal titolo per non rivelare da quanto tempo è online l'annuncio
+    clean_title = re.sub(r'\b\d{4}[-/]\d{2}[-/]\d{2}\b', '', orig_title)
+    clean_title = re.sub(r'\b\d{2}[-/]\d{2}[-/]\d{4}\b', '', clean_title)
+    clean_title = re.sub(r'\s*-\s*$', '', clean_title.strip())
+    clean_title = re.sub(r'^\s*-\s*', '', clean_title)
+    clean_title = re.sub(r'\s*-\s*-\s*', ' - ', clean_title)
+    clean_title = clean_title.strip()
     
-    # 4. Estrazione fotogrammi HD
+    # 4. Ottimizza descrizione con Groq (stile professionale, senza date)
+    optimized_text = optimize_description_with_groq(clean_title, orig_desc)
+    
+    # 5. Estrazione fotogrammi HD mantenendo l'aspect ratio
     photo_files = extract_frames(video_filename, num_frames=18)
     
     if not photo_files:
         print("Estrazione fotogrammi fallita.")
         return
         
-    # 5. Caricamento immagini su WordPress via MCP
+    # 6. Caricamento immagini su WordPress via MCP
     media_ids = []
     media_urls = []
     print(f"Caricamento di {len(photo_files)} immagini su WordPress via MCP...")
@@ -340,10 +433,10 @@ def main():
         
     featured_id = media_ids[0]
     
-    # 6. Crea l'annuncio property su WordPress via MCP
-    wp_listing_link = create_wp_listing(orig_title, optimized_text, featured_id, media_urls, video_url)
+    # 7. Crea l'annuncio property su WordPress via MCP
+    wp_listing_link = create_wp_listing(clean_title, optimized_text, featured_id, media_urls, video_url)
     
-    # 7. Pulizia file temporanei
+    # 8. Pulizia file temporanei
     print("Pulizia file temporanei in corso...")
     try:
         os.remove(video_filename)
