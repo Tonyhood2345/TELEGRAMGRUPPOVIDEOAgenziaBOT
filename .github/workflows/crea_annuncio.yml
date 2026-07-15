@@ -16,9 +16,9 @@ on:
         required: false
         default: ''
       indirizzo:
-        description: 'Indirizzo dell\'immobile (lascia vuoto per mappa agenzia)'
+        description: "Indirizzo dell'immobile (lascia vuoto per mappa agenzia)"
         required: false
-        default: ''
+        default: ""
 
 jobs:
   crea-annuncio:
