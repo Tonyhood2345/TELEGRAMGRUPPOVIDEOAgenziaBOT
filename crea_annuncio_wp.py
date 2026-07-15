@@ -9,7 +9,7 @@ import requests
 WP_URL = os.environ.get("WP_URL", "https://www.immobiliaregiancani.it/wp-json/easy-mcp-ai/v1/mcp")
 WP_TOKEN = os.environ.get("WP_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-70b-versatile")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama3-70b-8192")
 
 # Verifiche di sicurezza iniziali
 if not WP_TOKEN:
