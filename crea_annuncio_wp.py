@@ -520,7 +520,7 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         f'          // Usa la combinazione del giorno del mese e dell\'indice dell\'ora per decidere la disponibilità\n'
         f'          let seed = (futureDate.getDate() + idx) % 5;\n'
         f'          let isAvailable = (seed === 2); // Solo 1 slot su 5 è disponibile\n'
-          \n'
+        f'          \n'
         f'          if (isAvailable) {{\n'
         f'            html += `    <button type="button" onclick="selectSlot(\'${{dayName}} ${{dateStr}} alle ${{h}}\', this)" style="background:#10b981; color:#ffffff; border:0; padding:4px; font-size:10px; font-weight:700; border-radius:4px; cursor:pointer; width:100%;">🟢 ${{h}}</button>`;\n'
         f'          }} else {{\n'
