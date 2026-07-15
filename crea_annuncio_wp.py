@@ -61,8 +61,17 @@ def extract_frames(video_path, num_frames=18):
     return extracted_files
 
 def get_video_metadata(video_url):
-    """Ottiene descrizione e titolo originali del video da YouTube."""
-    print("Estrazione metadata da YouTube...")
+    """Ottiene descrizione e titolo originali del video. Cerca prima in metadata.json."""
+    if os.path.exists("metadata.json"):
+        try:
+            with open("metadata.json", "r", encoding="utf-8") as f:
+                meta = json.load(f)
+                print("Metadati letti con successo da metadata.json!")
+                return meta.get("title", "Nuova Proprietà"), meta.get("description", "")
+        except Exception as e:
+            print("Errore lettura metadata.json:", str(e))
+
+    print("Estrazione metadata via yt-dlp...")
     desc = run_command(f'yt-dlp --get-description "{video_url}"') or ""
     title = run_command(f'yt-dlp --get-title "{video_url}"') or "Nuova Proprietà Immobiliare"
     return title, desc
