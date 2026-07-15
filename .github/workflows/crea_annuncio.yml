@@ -15,6 +15,10 @@ on:
         description: 'Groq API Key (lascia vuoto se configurato nei Secrets del repo)'
         required: false
         default: ''
+      indirizzo:
+        description: 'Indirizzo dell\'immobile (lascia vuoto per mappa agenzia)'
+        required: false
+        default: ''
 
 jobs:
   crea-annuncio:
@@ -47,5 +51,6 @@ jobs:
         env:
           WP_TOKEN: ${{ github.event.inputs.wp_token || secrets.WP_TOKEN }}
           GROQ_API_KEY: ${{ github.event.inputs.groq_key || secrets.GROQ_API_KEY }}
-          WP_URL: 'https://www.immobiliaregiancani.it/wp-json/wp/v2'
+          WP_URL: 'https://www.immobiliaregiancani.it/wp-json/easy-mcp-ai/v1/mcp'
+          INPUT_INDIRIZZO: ${{ github.event.inputs.indirizzo }}
         run: python crea_annuncio_wp.py "${{ github.event.inputs.video_url }}"
