@@ -206,7 +206,9 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
 
     # 2. Calcolo Mutuo Consigliato (80% del valore a 25 anni @ 3.5% tasso fisso)
     price = extract_price_from_text(content) or extract_price_from_text(title)
-    if price:
+    has_declared_price = price is not None
+    
+    if has_declared_price:
         valore_immobile_formatted = f"{price:,}".replace(",", ".")
         importo_mutuo_val = int(price * 0.8)
         importo_mutuo_formatted = f"{importo_mutuo_val:,}".replace(",", ".")
@@ -214,25 +216,31 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         rata_mensile_formatted = str(rata_mensile_val)
         nota_mutuo = f"Calcolato su importo mutuo di {importo_mutuo_formatted} € (80% del valore dell'immobile di {valore_immobile_formatted} €) per 25 anni a tasso fisso stimato."
     else:
-        rata_mensile_formatted = "300"
+        # Valori di esempio per immobile non dichiarato
+        valore_immobile_formatted = "Trattativa Riservata"
         importo_mutuo_formatted = "60.000"
-        nota_mutuo = "Simulazione standard a rata fissa con importo mutuo stimato di 60.000 € per 25 anni."
-        valore_immobile_formatted = "75.000"
+        rata_mensile_formatted = "300"
+        nota_mutuo = "Simulazione d'esempio a rata fissa con importo mutuo stimato di 60.000 € (LTV 80% su valore stimato di 75.000 €) per 25 anni."
 
-    # === SEZIONE 1: PREZZO IN CIMA (SE ESISTENTE) ===
-    price_header_html = ""
-    if price:
+    # === SEZIONE 1: PREZZO IN CIMA (SE ESISTENTE, ALTRIMENTI PRICE ON CALL) ===
+    if has_declared_price:
         price_header_html = (
             f'\n<div class="property-price-header" style="margin-bottom:20px; font-family:\'Outfit\', sans-serif;">\n'
             f'  <span style="color:#64748b; font-size:12px; text-transform:uppercase; font-weight:700; letter-spacing:0.5px;">Prezzo Richiesto</span>\n'
             f'  <strong style="font-size:36px; color:#0f172a; display:block;">{valore_immobile_formatted} €</strong>\n'
             f'</div>\n'
         )
+    else:
+        price_header_html = (
+            f'\n<div class="property-price-header" style="margin-bottom:20px; font-family:\'Outfit\', sans-serif;">\n'
+            f'  <span style="color:#e11d48; font-size:12px; text-transform:uppercase; font-weight:700; letter-spacing:0.5px;">Informazioni Prezzo</span>\n'
+            f'  <strong style="font-size:30px; color:#e11d48; display:block;">Trattativa Riservata (Price on call)</strong>\n'
+            f'</div>\n'
+        )
 
     # === SEZIONE 2: IMMAGINI IN PRIMO PIANO (CLICCABILI) ===
     images_html = ""
     if images_urls:
-        # Foto principale grande
         images_html = (
             f'\n<div class="property-main-image" style="margin-bottom:15px; border-radius:16px; overflow:hidden; border:1px solid #e2e8f0; box-shadow:0 4px 12px rgba(0,0,0,0.05);">\n'
             f'  <a href="{images_urls[0]}" target="_blank" style="display:block;">\n'
@@ -240,38 +248,89 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
             f'  </a>\n'
             f'</div>\n'
         )
-        # Galleria sotto
         if len(images_urls) > 1:
             images_html += '<div class="property-gallery-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:10px; margin-bottom:25px;">'
             for img_url in images_urls[1:]:
                 images_html += f'<div style="overflow:hidden; border-radius:10px; border:1px solid #e2e8f0; aspect-ratio:1/1;"><a href="{img_url}" target="_blank" style="display:block; height:100%;"><img src="{img_url}" style="width:100%; height:100%; object-fit:cover; display:block;" /></a></div>'
             images_html += '</div>'
 
+    # === SEZIONE 2.5: VIDEO DI YOUTUBE (INSERITO DOPO LE FOTO) ===
+    video_id = ""
+    if "youtube.com" in video_url or "youtu.be" in video_url:
+        if "watch?v=" in video_url:
+            video_id = video_url.split("watch?v=")[1].split("&")[0]
+        elif "youtu.be/" in video_url:
+            video_id = video_url.split("youtu.be/")[1].split("?")[0]
+            
+    video_html = ""
+    if video_id:
+        video_html = (
+            f'\n<div class="property-video" style="margin-bottom:25px;">\n'
+            f'  <h3 style="font-family:\'Outfit\', sans-serif; font-size:20px; color:#0f172a; margin-top:0; margin-bottom:15px;">🎬 Video Visita Immobile</h3>\n'
+            f'  <iframe width="100%" height="450" src="https://www.youtube.com/embed/{video_id}" frameborder="0" allowfullscreen style="border-radius:16px; box-shadow:0 10px 25px rgba(0,0,0,0.08); display:block;"></iframe>\n'
+            f'</div>\n'
+        )
+
     # === SEZIONE 3: CONTENUTO / DESCRIZIONE ===
     description_html = f'<div class="property-description" style="font-size:15px; line-height:1.7; color:#334155; margin-bottom:30px;">{content}</div>'
 
-    # === SEZIONE 4: PREZZO E MUTUO RIASSUNTIVI (TABELLA TRASPARENTE A 3 COLONNE) ===
-    mortgage_summary_html = (
-        f'\n<div class="property-mortgage-summary" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:16px; padding:20px; margin-bottom:25px; font-family:\'Outfit\', sans-serif;">\n'
-        f'  <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; text-align:center;">\n'
-        f'    <div style="background:#ffffff; border:1px solid #e2e8f0; border-radius:12px; padding:10px 15px;">\n'
-        f'      <span style="color:#64748b; font-size:10px; font-weight:700; text-transform:uppercase; display:block; margin-bottom:4px;">Valore Immobile</span>\n'
-        f'      <strong style="font-size:20px; color:#0f172a; display:block;">{valore_immobile_formatted} €</strong>\n'
-        f'    </div>\n'
-        f'    <div style="background:#ffffff; border:1px solid #e2e8f0; border-radius:12px; padding:10px 15px;">\n'
-        f'      <span style="color:#0284c7; font-size:10px; font-weight:700; text-transform:uppercase; display:block; margin-bottom:4px;">Importo Mutuo (80%)</span>\n'
-        f'      <strong style="font-size:20px; color:#0284c7; display:block;">{importo_mutuo_formatted} €</strong>\n'
-        f'    </div>\n'
-        f'    <div style="background:#ffffff; border:2px solid #10b981; border-radius:12px; padding:10px 15px;">\n'
-        f'      <span style="color:#10b981; font-size:10px; font-weight:900; text-transform:uppercase; display:block; margin-bottom:4px;">Rata Mutuo Stimata</span>\n'
-        f'      <strong style="font-size:20px; color:#10b981; display:block;">~ {rata_mensile_formatted} € <span style="font-size:11px; font-weight:normal; color:#64748b;">/ mese</span></strong>\n'
-        f'    </div>\n'
-        f'  </div>\n'
-        f'  <div style="font-size:11px; color:#64748b; text-align:center; margin-top:10px; line-height:1.3; font-style:italic;">\n'
-        f'    ⚠️ Il calcolo della rata è basato su simulazione a 25 anni tasso fisso ed anticipo del 20% (LTV 80%). Non costituisce proposta contrattuale.\n'
-        f'  </div>\n'
-        f'</div>\n'
-    )
+    # === SEZIONE 3.5: FALLBACK PRICE ON CALL DOPO LA DESCRIZIONE ===
+    fallback_price_html = ""
+    if not has_declared_price:
+        fallback_price_html = (
+            f'\n<div class="property-price-fallback" style="background:#fff1f2; border:1px solid #fecdd3; border-radius:12px; padding:15px; margin-bottom:25px; text-align:center; font-family:\'Outfit\', sans-serif;">\n'
+            f'  <span style="font-size:22px; display:block; margin-bottom:4px;">💎</span>\n'
+            f'  <strong style="font-size:16px; color:#9f1239; display:block; text-transform:uppercase;">Prezzo su Richiesta / Price on Call</strong>\n'
+            f'  <p style="color:#be123c; font-size:13px; margin:5px 0 0 0;">Questa proprietà esclusiva è in trattativa riservata. Contattaci direttamente per ricevere la scheda economica completa.</p>\n'
+            f'</div>\n'
+        )
+
+    # === SEZIONE 4: PREZZO E MUTUO RIASSUNTIVI ===
+    if has_declared_price:
+        mortgage_summary_html = (
+            f'\n<div class="property-mortgage-summary" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:16px; padding:20px; margin-bottom:25px; font-family:\'Outfit\', sans-serif;">\n'
+            f'  <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; text-align:center;">\n'
+            f'    <div style="background:#ffffff; border:1px solid #e2e8f0; border-radius:12px; padding:10px 15px;">\n'
+            f'      <span style="color:#64748b; font-size:10px; font-weight:700; text-transform:uppercase; display:block; margin-bottom:4px;">Valore Immobile</span>\n'
+            f'      <strong style="font-size:20px; color:#0f172a; display:block;">{valore_immobile_formatted} €</strong>\n'
+            f'    </div>\n'
+            f'    <div style="background:#ffffff; border:1px solid #e2e8f0; border-radius:12px; padding:10px 15px;">\n'
+            f'      <span style="color:#0284c7; font-size:10px; font-weight:700; text-transform:uppercase; display:block; margin-bottom:4px;">Importo Mutuo (80%)</span>\n'
+            f'      <strong style="font-size:20px; color:#0284c7; display:block;">{importo_mutuo_formatted} €</strong>\n'
+            f'    </div>\n'
+            f'    <div style="background:#ffffff; border:2px solid #10b981; border-radius:12px; padding:10px 15px;">\n'
+            f'      <span style="color:#10b981; font-size:10px; font-weight:900; text-transform:uppercase; display:block; margin-bottom:4px;">Rata Mutuo Stimata</span>\n'
+            f'      <strong style="font-size:20px; color:#10b981; display:block;">~ {rata_mensile_formatted} € <span style="font-size:11px; font-weight:normal; color:#64748b;">/ mese</span></strong>\n'
+            f'    </div>\n'
+            f'  </div>\n'
+            f'  <div style="font-size:11px; color:#64748b; text-align:center; margin-top:10px; line-height:1.3; font-style:italic;">\n'
+            f'    ⚠️ Il calcolo della rata è basato su simulazione a 25 anni tasso fisso ed anticipo del 20% (LTV 80%). Non costituisce proposta contrattuale.\n'
+            f'  </div>\n'
+            f'</div>\n'
+        )
+    else:
+        # Se il prezzo non è dichiarato, il box mutuo è una simulazione puramente d'esempio per il cliente
+        mortgage_summary_html = (
+            f'\n<div class="property-mortgage-summary" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:16px; padding:20px; margin-bottom:25px; font-family:\'Outfit\', sans-serif;">\n'
+            f'  <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; text-align:center;">\n'
+            f'    <div style="background:#ffffff; border:1px solid #e2e8f0; border-radius:12px; padding:10px 15px;">\n'
+            f'      <span style="color:#64748b; font-size:10px; font-weight:700; text-transform:uppercase; display:block; margin-bottom:4px;">Valore Immobile Stima</span>\n'
+            f'      <strong style="font-size:20px; color:#0f172a; display:block;">Trattativa Riservata</strong>\n'
+            f'    </div>\n'
+            f'    <div style="background:#ffffff; border:1px solid #e2e8f0; border-radius:12px; padding:10px 15px;">\n'
+            f'      <span style="color:#0284c7; font-size:10px; font-weight:700; text-transform:uppercase; display:block; margin-bottom:4px;">Esempio Mutuo (80%)</span>\n'
+            f'      <strong style="font-size:20px; color:#0284c7; display:block;">60.000 €</strong>\n'
+            f'    </div>\n'
+            f'    <div style="background:#ffffff; border:2px solid #10b981; border-radius:12px; padding:10px 15px;">\n'
+            f'      <span style="color:#10b981; font-size:10px; font-weight:900; text-transform:uppercase; display:block; margin-bottom:4px;">Esempio Rata</span>\n'
+            f'      <strong style="font-size:20px; color:#10b981; display:block;">~ 300 € <span style="font-size:11px; font-weight:normal; color:#64748b;">/ mese</span></strong>\n'
+            f'    </div>\n'
+            f'  </div>\n'
+            f'  <div style="font-size:11px; color:#64748b; text-align:center; margin-top:10px; line-height:1.3; font-style:italic;">\n'
+            f'    ⚠️ {nota_mutuo}\n'
+            f'  </div>\n'
+            f'</div>\n'
+        )
 
     # === SEZIONE 5: APE CLASSE ENERGETICA COLORATA ED ANIMATA ===
     ape_colors = {
@@ -341,32 +400,7 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         '</div>\n'
     )
 
-    # === SEZIONE 8: VIDEO & SOCIAL ===
-    video_id = ""
-    if "youtube.com" in video_url or "youtu.be" in video_url:
-        if "watch?v=" in video_url:
-            video_id = video_url.split("watch?v=")[1].split("&")[0]
-        elif "youtu.be/" in video_url:
-            video_id = video_url.split("youtu.be/")[1].split("?")[0]
-            
-    video_html = ""
-    if video_id:
-        video_html = f'\n<div class="property-video" style="margin-bottom:25px;"><iframe width="100%" height="450" src="https://www.youtube.com/embed/{video_id}" frameborder="0" allowfullscreen style="border-radius:16px; box-shadow:0 10px 25px rgba(0,0,0,0.08); display:block;"></iframe></div>\n'
-
-    social_channels_html = (
-        '\n<div class="property-social-channels" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:16px; padding:20px; margin-bottom:25px; text-align:center; font-family:\'Outfit\', sans-serif;">\n'
-        '  <h4 style="font-size:15px; color:#0f172a; margin-top:0; margin-bottom:12px; font-weight:700;">📺 Segui i Nostri Canali Social e Video</h4>\n'
-        '  <div style="display:flex; flex-wrap:wrap; gap:10px; justify-content:center;">\n'
-        '    <a href="https://www.youtube.com/@immobiliaregiancani" target="_blank" style="background:#ff0000; color:#ffffff; text-decoration:none; padding:8px 16px; border-radius:20px; font-size:12px; font-weight:700;">📺 YouTube</a>\n'
-        '    <a href="https://www.facebook.com/234931856561526" target="_blank" style="background:#1877f2; color:#ffffff; text-decoration:none; padding:8px 16px; border-radius:20px; font-size:12px; font-weight:700;">📘 Facebook</a>\n'
-        '    <a href="https://www.instagram.com/immobiliaregiancani/" target="_blank" style="background:#e1306c; color:#ffffff; text-decoration:none; padding:8px 16px; border-radius:20px; font-size:12px; font-weight:700;">📸 Instagram</a>\n'
-        '    <a href="https://www.threads.net/@immobiliaregiancani" target="_blank" style="background:#000000; color:#ffffff; text-decoration:none; padding:8px 16px; border-radius:20px; font-size:12px; font-weight:700;">🧵 Threads</a>\n'
-        '    <a href="https://www.tiktok.com/@immobiliaregiancani" target="_blank" style="background:#010101; color:#ffffff; text-decoration:none; padding:8px 16px; border-radius:20px; font-size:12px; font-weight:700;">🎵 TikTok</a>\n'
-        '  </div>\n'
-        '</div>\n'
-    )
-
-    # === SEZIONE 9: FORM RICHIESTA MUTUO (COMPATTO CON SEZIONI MUTUO TRASPARENTI) ===
+    # === SEZIONE 9: FORM RICHIESTA MUTUO ===
     mortgage_calculator_html = (
         f'\n<div class="property-mortgage-calculator" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:16px; padding:25px; margin-bottom:25px; font-family:\'Outfit\', sans-serif; color:#0f172a;">\n'
         f'  <h3 style="font-size:20px; color:#0f172a; margin-top:0; margin-bottom:15px; border-bottom:2px solid #e2e8f0; padding-bottom:8px;">🏦 Calcola Mutuo dell\'Immobile</h3>\n'
@@ -412,6 +446,7 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         f'        </div>\n'
         f'        <div>\n'
         f'          <label style="font-size:11px; color:#475569; display:block; margin-bottom:4px; font-weight:700;">Luogo di Nascita *</label>\n'
+          \n'
         f'          <input type="text" id="m-luogo-nascita" required style="width:100%; padding:8px 12px; border:1px solid #cbd5e1; border-radius:8px; font-size:14px; background:#ffffff;" placeholder="Favara" />\n'
         f'        </div>\n'
         f'        <div>\n'
@@ -752,12 +787,13 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
     full_content = (
         f"{price_header_html}\n"
         f"{images_html}\n"
+        f"{video_html}\n"
         f"{description_html}\n"
+        f"{fallback_price_html}\n"
         f"{mortgage_summary_html}\n"
         f"{ape_badge_html}\n"
         f"{map_html}\n"
         f"{geo_desc_html}\n"
-        f"{video_html}\n"
         f"{planimetry_html}\n"
         f"{mortgage_calculator_html}\n"
         f"{contact_box_html}\n"
