@@ -446,7 +446,7 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         f'        </div>\n'
         f'        <div>\n'
         f'          <label style="font-size:11px; color:#475569; display:block; margin-bottom:4px; font-weight:700;">Luogo di Nascita *</label>\n'
-          \n'
+        f'          \n'
         f'          <input type="text" id="m-luogo-nascita" required style="width:100%; padding:8px 12px; border:1px solid #cbd5e1; border-radius:8px; font-size:14px; background:#ffffff;" placeholder="Favara" />\n'
         f'        </div>\n'
         f'        <div>\n'
