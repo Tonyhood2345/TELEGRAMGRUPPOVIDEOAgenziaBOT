@@ -194,6 +194,7 @@ def upload_photo_to_wp(photo_path):
 def create_wp_listing(title, content, featured_media_id, images_urls, video_url):
     """Crea l'annuncio CPT property in WordPress con layout composto, mappa, APE, moduli a scomparsa, calendario visite e DarIA fluttuante ad eventi."""
     print("Creazione dell'annuncio su WordPress via MCP...")
+    js_safe_title = title.replace("'", "\\'").replace('"', '\\"')
     
     # 1. Estrae classe energetica (APE) dal testo se presente, altrimenti default "E"
     ape_class = "E"
