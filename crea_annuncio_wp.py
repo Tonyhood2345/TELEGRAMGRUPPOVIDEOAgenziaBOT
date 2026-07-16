@@ -138,7 +138,7 @@ def optimize_description_with_groq(original_title, original_desc):
     
     prompt_system = (
         "Sei un broker immobiliare d'élite e copywriter professionista per Immobiliare Giancani. "
-        "Il tuo compito è ottimizzare la descrizione dell'annuncio per renderla prestigiosa, elegante, persuasiva e professionale. "
+        "Il tuo compito è ottimizzare la descrizione dell'annuncio per renderla prestigiosa, elegante, presumibilmente persuasiva e professionale. "
         "Focalizzati sulla SEO e GEO locale per la provincia di Agrigento (specialmente Favara). "
         "Usa parole chiave raffinate come 'prestigiosa residenza', 'investimento sicuro', 'ambienti luminosi e ben distribuiti', 'comfort abitativo'. "
         "Organizza il testo con elenchi puntati ed emoji eleganti per favorire la leggibilità. "
@@ -254,7 +254,10 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
                 images_html += f'<div style="overflow:hidden; border-radius:10px; border:1px solid #e2e8f0; aspect-ratio:1/1;"><a href="{img_url}" target="_blank" style="display:block; height:100%;"><img src="{img_url}" style="width:100%; height:100%; object-fit:cover; display:block;" /></a></div>'
             images_html += '</div>'
 
-    # === SEZIONE 2.5: VIDEO DI YOUTUBE (INSERITO DOPO LE FOTO) ===
+    # === SEZIONE 3: CONTENUTO / DESCRIZIONE ===
+    description_html = f'<div class="property-description" style="font-size:15px; line-height:1.7; color:#334155; margin-bottom:30px;">{content}</div>'
+
+    # === SEZIONE 3.2: VIDEO DI YOUTUBE (INSERITO DOPO LA DESCRIZIONE IN UNA FINESTRA CON CLICCA E VEDI) ===
     video_id = ""
     if "youtube.com" in video_url or "youtu.be" in video_url:
         if "watch?v=" in video_url:
@@ -265,14 +268,14 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
     video_html = ""
     if video_id:
         video_html = (
-            f'\n<div class="property-video" style="margin-bottom:25px;">\n'
-            f'  <h3 style="font-family:\'Outfit\', sans-serif; font-size:20px; color:#0f172a; margin-top:0; margin-bottom:15px;">🎬 Video Visita Immobile</h3>\n'
-            f'  <iframe width="100%" height="450" src="https://www.youtube.com/embed/{video_id}" frameborder="0" allowfullscreen style="border-radius:16px; box-shadow:0 10px 25px rgba(0,0,0,0.08); display:block;"></iframe>\n'
+            f'\n<div class="property-video-container" style="margin-top:20px; margin-bottom:30px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:16px; padding:20px; font-family:\'Outfit\', sans-serif;">\n'
+            f'  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:15px; flex-wrap:wrap; gap:10px;">\n'
+            f'    <h3 style="font-size:18px; color:#0f172a; margin:0; font-weight:700; display:flex; align-items:center; gap:8px;">🎬 Video Tour dell\'Immobile</h3>\n'
+            f'    <span style="background:#ef4444; color:#ffffff; padding:4px 10px; font-size:11px; font-weight:700; border-radius:12px; text-transform:uppercase; animation: pulse 1.5s infinite;">clicca e vedi</span>\n'
+            f'  </div>\n'
+            f'  <iframe width="100%" height="450" src="https://www.youtube.com/embed/{video_id}" frameborder="0" allowfullscreen style="border-radius:12px; box-shadow:0 10px 20px rgba(0,0,0,0.05); display:block;"></iframe>\n'
             f'</div>\n'
         )
-
-    # === SEZIONE 3: CONTENUTO / DESCRIZIONE ===
-    description_html = f'<div class="property-description" style="font-size:15px; line-height:1.7; color:#334155; margin-bottom:30px;">{content}</div>'
 
     # === SEZIONE 3.5: FALLBACK PRICE ON CALL DOPO LA DESCRIZIONE ===
     fallback_price_html = ""
@@ -280,7 +283,7 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         fallback_price_html = (
             f'\n<div class="property-price-fallback" style="background:#fff1f2; border:1px solid #fecdd3; border-radius:12px; padding:15px; margin-bottom:25px; text-align:center; font-family:\'Outfit\', sans-serif;">\n'
             f'  <span style="font-size:22px; display:block; margin-bottom:4px;">💎</span>\n'
-            f'  <strong style="font-size:16px; color:#9f1239; display:block; text-transform:uppercase;">Prezzo su Richiesta / Price on Call</strong>\n'
+            f'  <strong style="font-size:16px; color:#9f1239; display:block; text-transform:uppercase;">Prezzo su Richiesta (Price on call)</strong>\n'
             f'  <p style="color:#be123c; font-size:13px; margin:5px 0 0 0;">Questa proprietà esclusiva è in trattativa riservata. Contattaci direttamente per ricevere la scheda economica completa.</p>\n'
             f'</div>\n'
         )
@@ -309,7 +312,6 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
             f'</div>\n'
         )
     else:
-        # Se il prezzo non è dichiarato, il box mutuo è una simulazione puramente d'esempio per il cliente
         mortgage_summary_html = (
             f'\n<div class="property-mortgage-summary" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:16px; padding:20px; margin-bottom:25px; font-family:\'Outfit\', sans-serif;">\n'
             f'  <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; text-align:center;">\n'
@@ -395,7 +397,7 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         '\n<div class="property-geo-desc" style="background:#f1f5f9; border-radius:16px; padding:20px; margin-bottom:25px; font-family:\'Outfit\', sans-serif;">\n'
         '  <h4 style="font-size:18px; color:#0f172a; margin-top:0; margin-bottom:10px; font-weight:700;">📍 Vivere a Favara: Qualità e Collegamenti</h4>\n'
         '  <p style="color:#334155; font-size:14px; line-height:1.6; margin:0;">\n'
-        '    Favara si trova in una posizione geografica e logistica di assoluto rilievo, a pochissimi minuti dalla rinomata Valle dei Templi di Agrigento e dalle spettacolari spiagge della costa siciliana. Celebre a livello internazionale per il <strong>Farm Cultural Park</strong>, un centro d\'arte indipendente che ha rigenerato il centro storico, Favara offre oggi un tenore di vita accogliente e un eccezionale dinamismo culturale. È una cittadina ideale per chi cerca una qualità della vita originale, ritmi a misura d\'uomo, una ricca tradizione enogastronomica e la comodità di vivere vicini ai principali snodi commerciali e turistici della Sicilia meridionale.\n'
+        '    Favara si trova in una posizione geografica e logistica di absolutissimo rilievo, a pochissimi minuti dalla rinomata Valle dei Templi di Agrigento e dalle spettacolari spiagge della costa siciliana. Celebre a livello internazionale per il <strong>Farm Cultural Park</strong>, un centro d\'arte indipendente che ha rigenerato il centro storico, Favara offre oggi un tenore di vita accogliente e un eccezionale dinamismo culturale. È una cittadina ideale per chi cerca una qualità della vita originale, ritmi a misura d\'uomo, una ricca tradizione enogastronomica e la comodità di vivere vicini ai principali snodi commerciali e turistici della Sicilia meridionale.\n'
         '  </p>\n'
         '</div>\n'
     )
@@ -640,9 +642,9 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         '</div>\n'
     )
 
-    # === SEZIONE 12: WIDGET STICKY 'DARIA' (BOTTONE + DRAWER CON EVENTI ED INTERVALLI) ===
+    # === SEZIONE 12: WIDGET STICKY 'DARIA' CON CHAT INTERATTIVA CON ALGORITMO LOCALE E APPSCRIPT ===
     daria_sticky_widget_html = (
-        f'\n<!-- Contenitore del Widget Fluttuante -->\n'
+        f'\n<!-- Contenitore del Widget Fluttuante DarIA -->\n'
         f'<div id="daria-root-widget" style="position:fixed; bottom:80px; right:25px; z-index:99999; font-family:\'Outfit\', sans-serif;">\n'
         f'  \n'
         f'  <style>\n'
@@ -678,54 +680,92 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         f'      border-radius: 50%;\n'
         f'      animation: pulse-ring-daria 2s infinite;\n'
         f'    }}\n'
+        f'    .chat-bubble-msg {{\n'
+        f'      padding: 10px 14px;\n'
+        f'      border-radius: 14px;\n'
+        f'      font-size: 13px;\n'
+        f'      line-height: 1.4;\n'
+        f'      max-width: 80%;\n'
+        f'      margin-bottom: 8px;\n'
+        f'      display: inline-block;\n'
+        f'      word-wrap: break-word;\n'
+        f'    }}\n'
+        f'    .msg-daria {{\n'
+        f'      background: #f1f5f9;\n'
+        f'      color: #0f172a;\n'
+        f'      border-bottom-left-radius: 3px;\n'
+        f'      text-align: left;\n'
+        f'      float: left;\n'
+        f'      clear: both;\n'
+        f'    }}\n'
+        f'    .msg-user {{\n'
+        f'      background: #0284c7;\n'
+        f'      color: #ffffff;\n'
+        f'      border-bottom-right-radius: 3px;\n'
+        f'      text-align: left;\n'
+        f'      float: right;\n'
+        f'      clear: both;\n'
+        f'    }}\n'
         f'  </style>\n'
         f'  \n'
-        f'  <!-- 1. FUMETTO NOTIFICA TEMPORIZZATO -->\n'
-        f'  <div id="daria-bubble" style="display:none; position:absolute; bottom:85px; right:0; width:220px; background:#0f172a; color:#ffffff; padding:12px 16px; border-radius:16px; font-size:13px; line-height:1.4; box-shadow:0 8px 20px rgba(0,0,0,0.2); transition:all 0.4s ease; transform:translateY(10px); opacity:0; z-index:10;">\n'
-        f'    <strong>DarIA:</strong> Ciao! Sono qui per aiutarti a fissare una visita o per calcolare il mutuo. Contattami! 🤖✨\n'
+        f'  <!-- 1. FUMETTO NOTIFICA TEMPORIZZATO (PRECISO: Ciao Sono qui per aiutarti!!) -->\n'
+        f'  <div id="daria-bubble" style="display:none; position:absolute; bottom:85px; right:0; width:180px; background:#0f172a; color:#ffffff; padding:12px 16px; border-radius:16px; font-size:13px; line-height:1.4; box-shadow:0 8px 20px rgba(0,0,0,0.2); transition:all 0.4s ease; transform:translateY(10px); opacity:0; z-index:10; font-weight:700; text-align:center;">\n'
+        f'    Ciao Sono qui per aiutarti!!\n'
         f'    <div style="position:absolute; bottom:-6px; right:25px; width:12px; height:12px; background:#0f172a; transform:rotate(45deg);"></div>\n'
         f'  </div>\n'
         f'  \n'
-        f'  <!-- 2. BOTTONE AVATAR -->\n'
+        f'  <!-- 2. BOTTONE AVATAR (CON IMMAGINE CASETTA LOGO AGENZIA) -->\n'
         f'  <div id="daria-button-collapsed" class="daria-round-trigger" onclick="openDariaDrawer()">\n'
         f'    <div class="daria-trigger-pulse"></div>\n'
-        f'    <img src="https://www.immobiliaregiancani.it/wp-content/uploads/2026/07/daria_avatar_placeholder.png" onerror="this.src=\'https://cdn-icons-png.flaticon.com/512/4712/4712109.png\'" style="width:58px; height:58px; border-radius:50%; object-fit:cover; position:relative; z-index:2;" />\n'
+        f'    <img src="https://www.immobiliaregiancani.it/wp-content/uploads/2025/12/cropped-casetta-330x180.png" style="width:50px; height:auto; position:relative; z-index:2; border-radius:0;" />\n'
         f'    <span style="position:absolute; bottom:2px; right:2px; width:14px; height:14px; background:#10b981; border:2px solid #ffffff; border-radius:50%; z-index:3;"></span>\n'
         f'  </div>\n'
         f'  \n'
-        f'  <!-- 3. CASSETTO CONTATTI -->\n'
-        f'  <div id="daria-drawer-expanded" style="display:none; position:absolute; bottom:0; right:0; width:290px; background:rgba(255, 255, 255, 0.9); backdrop-filter:blur(15px); -webkit-backdrop-filter:blur(15px); border:1px solid rgba(255,255,255,0.45); border-radius:24px; box-shadow:0 15px 35px rgba(0,0,0,0.2); padding:18px; transition:all 0.3s ease; transform:scale(0.8); opacity:0; transform-origin:bottom right;">\n'
-        f'    <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px; position:relative;">\n'
-        f'      <div style="position:relative; width:48px; height:48px;">\n'
-        f'        <img src="https://www.immobiliaregiancani.it/wp-content/uploads/2026/07/daria_avatar_placeholder.png" onerror="this.src=\'https://cdn-icons-png.flaticon.com/512/4712/4712109.png\'" style="width:100%; height:100%; border-radius:50%; object-fit:cover; border:2px solid #ffffff; box-shadow:0 3px 6px rgba(0,0,0,0.1);" alt="DarIA" />\n'
-        f'        <span style="position:absolute; bottom:0; right:0; width:12px; height:12px; background:#10b981; border:2px solid #ffffff; border-radius:50%;"></span>\n'
+        f'  <!-- 3. CASSETTO CHAT INTERATTIVA (FINESTRA STRETTA STILE SMARTPHONE) -->\n'
+        f'  <div id="daria-drawer-expanded" style="display:none; position:absolute; bottom:0; right:0; width:310px; background:#ffffff; border-radius:20px; box-shadow:0 15px 35px rgba(0,0,0,0.2); transition:all 0.3s ease; transform:scale(0.8); opacity:0; transform-origin:bottom right; overflow:hidden; border:1px solid #cbd5e1;">\n'
+        f'    \n'
+        f'    <!-- Header Chat -->\n'
+        f'    <div style="background:linear-gradient(135deg, #0f172a, #1e293b); padding:15px; display:flex; align-items:center; gap:12px; color:#ffffff; border-bottom:1px solid #334155;">\n'
+        f'      <div style="position:relative; width:40px; height:40px; background:#ffffff; border-radius:50%; display:flex; align-items:center; justify-content:center; padding:5px;">\n'
+        f'        <img src="https://www.immobiliaregiancani.it/wp-content/uploads/2025/12/cropped-casetta-330x180.png" style="width:100%; height:auto;" />\n'
+        f'        <span style="position:absolute; bottom:0; right:0; width:10px; height:10px; background:#10b981; border:2px solid #ffffff; border-radius:50%;"></span>\n'
         f'      </div>\n'
         f'      <div style="flex-grow:1;">\n'
-        f'        <h4 style="margin:0; font-size:14px; color:#0f172a; font-weight:800; display:flex; align-items:center; gap:4px;">DarIA <span style="font-size:9px; background:#e0f2fe; color:#0369a1; padding:1px 4px; border-radius:10px;">Attiva</span></h4>\n'
-        f'        <span style="font-size:11px; color:#64748b;">Consulente Virtuale</span>\n'
+        f'        <h4 style="margin:0; font-size:14px; font-weight:800;">DarIA Chat</h4>\n'
+        f'        <span style="font-size:10px; color:#94a3b8;">Attiva ora • Risponde all\'istante</span>\n'
         f'      </div>\n'
-        f'      <button onclick="closeDariaDrawer(event)" style="background:none; border:0; color:#94a3b8; cursor:pointer; font-size:18px; font-weight:700; padding:5px; line-height:1;">&times;</button>\n'
+        f'      <button onclick="closeDariaDrawer(event)" style="background:none; border:0; color:#ffffff; cursor:pointer; font-size:22px; font-weight:300; padding:0 5px; line-height:1;">&times;</button>\n'
         f'    </div>\n'
-        f'    <p style="margin:0 0 12px 0; font-size:12px; color:#475569; line-height:1.4;">\n'
-        f'      Come posso assisterti oggi? Scegli un\'azione rapida per essere ricontattato:\n'
-        f'    </p>\n'
-        f'    <div style="display:flex; flex-direction:column; gap:6px;">\n'
-        f'      <button onclick="scrollToVisite()" style="width:100%; background:linear-gradient(135deg, #3b82f6, #1d4ed8); color:#ffffff; border:0; padding:9px; border-radius:10px; font-size:12px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:5px;">\n'
-        f'        🗓️ Prenota Visita / Appuntamento\n'
-        f'      </button>\n'
-        f'      <a href="https://wa.me/393505902923?text=Salve%20DarIA%2C%20vorrei%20informazioni%20su%20questo%20annuncio%20su%20Immobiliare%20Giancani" target="_blank" style="text-decoration:none; width:100%; background:#25d366; color:#ffffff; padding:9px; border-radius:10px; font-size:12px; font-weight:700; text-align:center; display:flex; align-items:center; justify-content:center; gap:5px;">\n'
-        f'        💬 Scrivimi su WhatsApp\n'
+        f'    \n'
+        f'    <!-- Area Messaggi Chat -->\n'
+        f'    <div id="daria-chat-messages" style="height:250px; overflow-y:auto; padding:15px; background:#f8fafc; display:block;">\n'
+        f'      <div class="chat-bubble-msg msg-daria">\n'
+        f'        Ciao! Sono DarIA 🤖, l\'assistente AI di Immobiliare Giancani. Come posso aiutarti oggi? Chiedimi pure sul mutuo, sul prezzo o sulle visite!\n'
+        f'      </div>\n'
+        f'    </div>\n'
+        f'    \n'
+        f'    <!-- Area Digitazione -->\n'
+        f'    <form onsubmit="handleSendDariaMessage(event)" style="display:flex; border-top:1px solid #e2e8f0; background:#ffffff; padding:8px;">\n'
+        f'      <input type="text" id="daria-chat-input" placeholder="Scrivi una domanda..." required style="flex-grow:1; border:0; padding:8px 12px; font-size:13px; outline:none; background:#ffffff; color:#0f172a;" />\n'
+        f'      <button type="submit" style="background:#0284c7; color:#ffffff; border:0; border-radius:8px; padding:6px 12px; font-size:12px; font-weight:700; cursor:pointer;">Invia</button>\n'
+        f'    </form>\n'
+        f'    \n'
+        f'    <!-- Pulsanti di Contatto Rapido -->\n'
+        f'    <div style="background:#f1f5f9; padding:10px; border-top:1px solid #e2e8f0; display:flex; gap:8px; justify-content:stretch;">\n'
+        f'      <a href="https://wa.me/393505902923?text=Salve%20vorrei%20informazioni%20su%20questo%20immobile%20su%20Immobiliare%20Giancani" target="_blank" style="flex:1; text-decoration:none; background:#25d366; color:#ffffff; padding:8px; border-radius:10px; font-size:11px; font-weight:700; text-align:center; display:flex; align-items:center; justify-content:center; gap:4px;">\n'
+        f'        💬 WhatsApp\n'
         f'      </a>\n'
-        f'      <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">\n'
-        f'        <a href="tel:+393201667156" style="text-decoration:none; background:#0284c7; color:#ffffff; padding:8px; border-radius:10px; font-size:11px; font-weight:700; text-align:center;">📞 Chiama</a>\n'
-        f'        <a href="https://t.me/immobiliaregiancani" target="_blank" style="text-decoration:none; background:#22d3ee; color:#ffffff; padding:8px; border-radius:10px; font-size:11px; font-weight:700; text-align:center;">✈️ Telegram</a>\n'
-        f'      </div>\n'
+        f'      <a href="tel:+393201667156" style="flex:1; text-decoration:none; background:#0284c7; color:#ffffff; padding:8px; border-radius:10px; font-size:11px; font-weight:700; text-align:center; display:flex; align-items:center; justify-content:center; gap:4px;">\n'
+        f'        📞 Chiama\n'
+        f'      </a>\n'
         f'    </div>\n'
+        f'    \n'
         f'  </div>\n'
         f'  \n'
         f'</div>\n'
         f'\n'
         f'<script>\n'
+        f'  // Mostra il fumetto dopo un paio di secondi (2 secondi esatti)\n'
         f'  setTimeout(function() {{\n'
         f'    const bubble = document.getElementById("daria-bubble");\n'
         f'    bubble.style.display = "block";\n'
@@ -734,10 +774,11 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         f'      bubble.style.transform = "translateY(0)";\n'
         f'    }}, 50);\n'
         f'    \n'
+        f'    // Scompare dopo 6 secondi\n'
         f'    setTimeout(function() {{\n'
         f'      closeDariaBubble();\n'
         f'    }}, 6000);\n'
-        f'  }}, 3000);\n'
+        f'  }}, 2000);\n'
         f'  \n'
         f'  function closeDariaBubble() {{\n'
         f'    const bubble = document.getElementById("daria-bubble");\n'
@@ -776,32 +817,80 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         f'    }}, 300);\n'
         f'  }}\n'
         f'  \n'
-        f'  function scrollToVisite() {{\n'
-        f'    closeDariaDrawer(null);\n'
-        f'    document.getElementById("info-form").scrollIntoView({{behavior: "smooth"}});\n'
+        f'  // Gestione messaggi chat locale + Apps Script\n'
+        f'  function handleSendDariaMessage(e) {{\n'
+        f'    e.preventDefault();\n'
+        f'    const input = document.getElementById("daria-chat-input");\n'
+        f'    const text = input.value.trim();\n'
+        f'    if (!text) return;\n'
+        f'    \n'
+        f'    input.value = "";\n'
+        f'    appendChatMessage(text, "msg-user");\n'
+        f'    \n'
+        f'    // Mostra indicatore di scrittura\n'
+        f'    const typingBubble = appendChatMessage("Sto scrivendo...", "msg-daria");\n'
+        f'    \n'
+        f'    // Richiesta a Google Apps Script per risposta dinamica\n'
+        f'    const appsScriptUrl = `https://script.google.com/macros/s/AKfycbzq3gfy5JCZJT1tyF4oECkBFVrckxVzqDuAJgUSvPhU4rv2Bztj7EUT3m4b5ILm4Vdc/exec?action=daria_chat&message=${{encodeURIComponent(text)}}&immobile=${{encodeURIComponent("{js_safe_title}")}}`;\n'
+        f'    \n'
+        f'    fetch(appsScriptUrl)\n'
+        f'      .then(r => r.json())\n'
+        f'      .then(data => {{\n'
+        f'        typingBubble.remove();\n'
+        f'        if (data && data.response) {{\n'
+        f'          appendChatMessage(data.response, "msg-daria");\n'
+        f'        }} else {{\n'
+        f'          handleDariaLocalResponse(text, typingBubble);\n'
+        f'        }}\n'
+        f'      }})\n'
+        f'      .catch(() => {{\n'
+        f'        // In caso di errore CORS o rete, rispondi con l\'AI locale del browser\n'
+        f'        typingBubble.remove();\n'
+        f'        handleDariaLocalResponse(text);\n'
+        f'      }});\n'
+        f'  }}\n'
+        f'  \n'
+        f'  function appendChatMessage(text, className) {{\n'
+        f'    const messagesContainer = document.getElementById("daria-chat-messages");\n'
+        f'    const wrapper = document.createElement("div");\n'
+        f'    wrapper.style.width = "100%";\n'
+        f'    wrapper.style.display = "block";\n'
+        f'    \n'
+        f'    const bubble = document.createElement("div");\n'
+        f'    bubble.className = "chat-bubble-msg " + className;\n'
+        f'    bubble.innerText = text;\n'
+        f'    \n'
+        f'    wrapper.appendChild(bubble);\n'
+        f'    messagesContainer.appendChild(wrapper);\n'
+        f'    messagesContainer.scrollTop = messagesContainer.scrollHeight;\n'
+        f'    return wrapper;\n'
+        f'  }}\n'
+        f'  \n'
+        f'  function handleDariaLocalResponse(msg) {{\n'
+        f'    const text = msg.toLowerCase();\n'
+        f'    let reply = "Non ho capito bene la domanda. Puoi contattare Antonio su WhatsApp cliccando il pulsante verde qui sotto per assistenza immediata!";\n'
+        f'    \n'
+        f'    if (text.includes("prezzo") || text.includes("costo") || text.includes("costa")) {{\n'
+        f'      reply = "Il prezzo dell\'immobile è su richiesta (Trattativa Riservata). Clicca su WhatsApp in basso per richiedere la scheda prezzi completa!";\n'
+        f'    }} else if (text.includes("mutuo") || text.includes("rata") || text.includes("finanziamento")) {{\n'
+        f'      reply = "Per questo immobile offriamo una rata stimata a partire da circa 300 € al mese. Trovi la sezione di calcolo interattiva a metà pagina!";\n'
+        f'    }} else if (text.includes("visita") || text.includes("vedere") || text.includes("appuntamento")) {{\n'
+        f'      reply = "Puoi prenotare una visita in pochi secondi compilando il calendario interattivo che trovi in fondo alla pagina!";\n'
+        f'    }} else if (text.includes("dove") || text.includes("posizione") || text.includes("indirizzo")) {{\n'
+        f'      reply = "L\'immobile si trova in zona residenziale ben collegata a Favara (AG). Clicca sul tasto WhatsApp per ricevere la posizione esatta!";\n'
+        f'    }}\n'
+        f'    \n'
+        f'    appendChatMessage(reply, "msg-daria");\n'
         f'  }}\n'
         f'</script>\n'
-    )
-    
-    social_channels_html = (
-        '\n<div class="property-social-channels" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:16px; padding:20px; margin-bottom:25px; text-align:center; font-family:\'Outfit\', sans-serif;">\n'
-        '  <h4 style="font-size:15px; color:#0f172a; margin-top:0; margin-bottom:12px; font-weight:700;">📺 Segui i Nostri Canali Social e Video</h4>\n'
-        '  <div style="display:flex; flex-wrap:wrap; gap:10px; justify-content:center;">\n'
-        '    <a href="https://www.youtube.com/@immobiliaregiancani" target="_blank" style="background:#ff0000; color:#ffffff; text-decoration:none; padding:8px 16px; border-radius:20px; font-size:12px; font-weight:700;">📺 YouTube</a>\n'
-        '    <a href="https://www.facebook.com/234931856561526" target="_blank" style="background:#1877f2; color:#ffffff; text-decoration:none; padding:8px 16px; border-radius:20px; font-size:12px; font-weight:700;">📘 Facebook</a>\n'
-        '    <a href="https://www.instagram.com/immobiliaregiancani/" target="_blank" style="background:#e1306c; color:#ffffff; text-decoration:none; padding:8px 16px; border-radius:20px; font-size:12px; font-weight:700;">📸 Instagram</a>\n'
-        '    <a href="https://www.threads.net/@immobiliaregiancani" target="_blank" style="background:#000000; color:#ffffff; text-decoration:none; padding:8px 16px; border-radius:20px; font-size:12px; font-weight:700;">🧵 Threads</a>\n'
-        '    <a href="https://www.tiktok.com/@immobiliaregiancani" target="_blank" style="background:#010101; color:#ffffff; text-decoration:none; padding:8px 16px; border-radius:20px; font-size:12px; font-weight:700;">🎵 TikTok</a>\n'
-        '  </div>\n'
-        '</div>\n'
     )
     
     # === ABBINAMENTO ELEMENTI NEL NUOVO ORDINE RICHIESTO ===
     full_content = (
         f"{price_header_html}\n"
         f"{images_html}\n"
-        f"{video_html}\n"
         f"{description_html}\n"
+        f"{video_html}\n"
         f"{fallback_price_html}\n"
         f"{mortgage_summary_html}\n"
         f"{ape_badge_html}\n"
