@@ -20,6 +20,32 @@ if not WP_TOKEN:
 if not GROQ_API_KEY:
     print("ATTENZIONE: Variabile d'ambiente GROQ_API_KEY non definita. L'ottimizzazione con Groq LLM fallirà.")
 
+def aggiorna_database_json(immobile_data, file_path="immobili.json"):
+    """
+    Aggiorna o inserisce un immobile nel file immobili.json.
+    """
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                database = json.load(f)
+                if not isinstance(database, list):
+                    database = []
+        except Exception:
+            database = []
+    else:
+        database = []
+
+    # Rimuovi l'immobile se esiste già per evitare duplicati
+    database = [item for item in database if str(item.get('id')) != str(immobile_data.get('id'))]
+    database.append(immobile_data)
+
+    try:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(database, f, ensure_ascii=False, indent=4)
+        print(f"✅ Database JSON aggiornato localmente per l'immobile {immobile_data.get('id')}")
+    except Exception as e:
+        print(f"❌ Errore durante il salvataggio in {file_path}: {e}")
+
 def call_mcp_tool(tool_name, arguments):
     """Chiama un tool sul server MCP di WordPress usando JSON-RPC."""
     headers = {
@@ -529,9 +555,9 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         f'  \n'
         f'  <!-- Foto Profilo Agente Antonio Giancani -->\n'
         f'  <div style="display:flex; flex-direction:column; align-items:center; margin-bottom:20px; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:20px;">\n'
-        f'    <div style="width:100px; height:100px; border-radius:50%; overflow:hidden; border:3px solid #10b981; box-shadow:0 8px 20px rgba(16,185,129,0.3); margin-bottom:10px;">\n'
+        f'    <a href="https://wa.me/393201667156?text=Salve%20Antonio,%20vorrei%20informazioni%20su%20questo%20immobile:%20{urllib.parse.quote(title)}" target="_blank" style="width:100px; height:100px; border-radius:50%; overflow:hidden; border:3px solid #10b981; box-shadow:0 8px 20px rgba(16,185,129,0.3); margin-bottom:10px; display:block; transition:transform 0.3s;" onmouseover="this.style.transform=\'scale(1.08)\'" onmouseout="this.style.transform=\'scale(1)\'" title="Clicca per parlare con Antonio su WhatsApp">\n'
         f'      <img src="https://www.immobiliaregiancani.it/wp-content/uploads/2026/07/antonio-giancani.jpg" alt="Antonio Giancani" style="width:100%; height:100%; object-fit:cover;" />\n'
-        f'    </div>\n'
+        f'    </a>\n'
         f'    <div style="font-size:18px; font-weight:800; color:#ffffff; letter-spacing:0.5px;">Antonio Giancani</div>\n'
         f'    <div style="font-size:12px; color:#10b981; font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-top:2px;">Agente Immobiliare Dedicato</div>\n'
         f'  </div>\n'
@@ -1089,7 +1115,36 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
     
     res_data = call_mcp_tool("wp_create_cpt_item", args)
     if res_data and 'link' in res_data:
-        return res_data['link']
+        wp_id = res_data.get('id', 'N/D')
+        wp_link = res_data['link']
+        
+        # Estrai tipologia e contratto
+        contratto = "Vendita" if "vendita" in title.lower() or "vendita" in content.lower() else "Affitto"
+        
+        # Estrai vani/stanze
+        stanze = 4
+        stanze_match = re.search(r'(\d+)\s*(vani|stanze|camere)', content.lower())
+        if stanze_match:
+            stanze = int(stanze_match.group(1))
+            
+        # Estrai zona
+        zona = "Favara"
+        if PROPERTY_ADDRESS:
+            zona = PROPERTY_ADDRESS.split(",")[0].strip()
+            
+        immobile_info = {
+            "id": str(wp_id),
+            "titolo": title,
+            "prezzo": str(price) if has_declared_price else "Trattativa Riservata",
+            "contratto": contratto,
+            "zona": zona,
+            "stanze": stanze,
+            "copertina": images_urls[0] if images_urls else "",
+            "url": wp_link
+        }
+        
+        aggiorna_database_json(immobile_info)
+        return wp_link
     return None
 
 def main():
