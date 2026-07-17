@@ -1147,6 +1147,30 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         return wp_link
     return None
 
+def download_youtube_thumbnail(video_url):
+    """Scarica lo screenshot copertina da YouTube se il download video fallisce."""
+    video_id = None
+    # Estrae ID video di 11 caratteri da vari formati URL
+    m = re.search(r'(?:v=|\/v\/|embed\/|youtu\.be\/|\/shorts\/)([a-zA-Z0-9_-]{11})', video_url)
+    if m:
+        video_id = m.group(1)
+    if not video_id:
+        return None
+    
+    # Prova a scaricare maxresdefault, poi sddefault, poi hqdefault
+    for quality in ["maxresdefault", "sddefault", "hqdefault"]:
+        thumb_url = f"https://img.youtube.com/vi/{video_id}/{quality}.jpg"
+        try:
+            res = requests.get(thumb_url, verify=False, timeout=10)
+            if res.status_code == 200:
+                filename = f"thumb_{video_id}.jpg"
+                with open(filename, "wb") as f:
+                    f.write(res.content)
+                return filename
+        except Exception as e:
+            print(f"Errore download thumbnail {quality}:", str(e))
+    return None
+
 def main():
     if len(sys.argv) < 2:
         print("Uso: python crea_annuncio_wp.py <URL_VIDEO_YOUTUBE>")
@@ -1158,22 +1182,48 @@ def main():
     
     # 1. Download Video
     video_filename = "video_annuncio_temp.mp4"
+    video_downloaded = False
+    
     if video_url.startswith("http") and ".mp4" in video_url:
         print("Download video diretto da URL .mp4...")
         try:
             res = requests.get(video_url, verify=False)
             with open(video_filename, "wb") as f:
                 f.write(res.content)
+            video_downloaded = os.path.exists(video_filename) and os.path.getsize(video_filename) > 0
         except Exception as e:
             print("Errore download diretto video:", str(e))
-            return
     else:
-        print("Download video via yt-dlp...")
-        download_cmd = f'yt-dlp -f "best" -o "{video_filename}" "{video_url}"'
+        print("Download video via yt-dlp con bypass standard...")
+        # Tentativo 1: player-client standard con spoofing mobile
+        download_cmd = f'yt-dlp -f "best[ext=mp4]/best" --extractor-args "youtube:player-client=ios,android" -o "{video_filename}" "{video_url}"'
         run_command(download_cmd)
+        video_downloaded = os.path.exists(video_filename) and os.path.getsize(video_filename) > 0
+        
+        # Tentativo 2: fallback con client embedded
+        if not video_downloaded:
+            print("Download standard fallito. Provo con client embedded alternativi...")
+            download_cmd = f'yt-dlp -f "best[ext=mp4]/best" --extractor-args "youtube:player-client=android_embedded,web_embedded" -o "{video_filename}" "{video_url}"'
+            run_command(download_cmd)
+            video_downloaded = os.path.exists(video_filename) and os.path.getsize(video_filename) > 0
+            
+    photo_files = []
     
-    if not os.path.exists(video_filename) or os.path.getsize(video_filename) == 0:
-        print("Download del video fallito.")
+    if video_downloaded:
+        print("Video scaricato con successo. Avvio estrazione 18 fotogrammi...")
+        photo_files = extract_frames(video_filename, num_frames=18)
+    else:
+        print("Download del video fallito completamente. Provo a scaricare la copertina di YouTube...")
+        thumb_file = download_youtube_thumbnail(video_url)
+        if thumb_file:
+            print("Copertina scaricata con successo!")
+            photo_files = [thumb_file]
+        else:
+            print("Né il video né la copertina sono stati scaricati. Impossibile procedere.")
+            return
+            
+    if not photo_files:
+        print("Nessun fotogramma o copertina disponibile per l'annuncio.")
         return
         
     # 2. Estrai metadata originali
@@ -1190,14 +1240,7 @@ def main():
     # 4. Ottimizza descrizione con Groq (stile professionale, senza date)
     optimized_text = optimize_description_with_groq(clean_title, orig_desc)
     
-    # 5. Estrazione fotogrammi HD mantenendo l'aspect ratio
-    photo_files = extract_frames(video_filename, num_frames=18)
-    
-    if not photo_files:
-        print("Estrazione fotogrammi fallita.")
-        return
-        
-    # 6. Caricamento immagini su WordPress via MCP
+    # 5. Caricamento immagini su WordPress via MCP
     media_ids = []
     media_urls = []
     print(f"Caricamento di {len(photo_files)} immagini su WordPress via MCP...")
@@ -1214,15 +1257,17 @@ def main():
         
     featured_id = media_ids[0]
     
-    # 7. Crea l'annuncio property su WordPress via MCP
+    # 6. Crea l'annuncio property su WordPress via MCP
     wp_listing_link = create_wp_listing(clean_title, optimized_text, featured_id, media_urls, video_url)
     
-    # 8. Pulizia file temporanei
+    # 7. Pulizia file temporanei
     print("Pulizia file temporanei in corso...")
     try:
-        os.remove(video_filename)
+        if os.path.exists(video_filename):
+            os.remove(video_filename)
         for photo in photo_files:
-            os.remove(photo)
+            if os.path.exists(photo):
+                os.remove(photo)
     except Exception as e:
         print("Errore pulizia file:", str(e))
         
