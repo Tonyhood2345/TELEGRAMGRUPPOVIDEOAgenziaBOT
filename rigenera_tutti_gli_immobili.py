@@ -10,7 +10,6 @@ SPREADSHEET_ID = "1s68pw0WEUcV0ZqltiahAqCp_r5rsycSjxKNh0VZQq_g"
 TARGET_GID = 1161427165 # GID di DATABASE_IMMOBILI (146 righe totali)
 
 def get_google_sheets_client():
-    # Rileva se stiamo eseguendo lo script all'interno di Google Colab
     in_colab = False
     try:
         import google.colab
@@ -24,7 +23,6 @@ def get_google_sheets_client():
         creds, _ = default()
         return gspread.authorize(creds)
     else:
-        # Autenticazione standard per GitHub Actions o esecuzione locale con Service Account
         creds_val = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
         if not creds_val:
             raise ValueError("Variabile GOOGLE_APPLICATION_CREDENTIALS non definita.")
@@ -65,17 +63,11 @@ def main():
         
         idx_desc = headers.index("DESCRIZIONE") if "DESCRIZIONE" in headers else 4
         
-        idx_video = -1
-        for col_name in ["LINK_YOUTUBE", "LINK", "LINK_FACEBOOK"]:
-            if col_name in headers:
-                idx_video = headers.index(col_name)
-                break
-        if idx_video == -1:
-            idx_video = 15 # default fallback
-            
-        idx_pub = headers.index("PUBBLICATO") if "PUBBLICATO" in headers else -1
+        # Identifichiamo TUTTI gli indici delle colonne che possono contenere link video
+        candidate_cols = ["LINK_YOUTUBE", "LINK", "LINK_FACEBOOK", "LINK_INSTAGRAM"]
+        video_col_indices = [headers.index(col) for col in candidate_cols if col in headers]
         
-        print(f"Mappatura Colonne: idx_desc={idx_desc}, idx_video={idx_video}, idx_pub={idx_pub}")
+        print(f"Mappatura Colonne: idx_desc={idx_desc}, video_col_indices={video_col_indices}")
         
         rows = all_vals[1:]
         
@@ -85,13 +77,15 @@ def main():
         for idx, row in enumerate(rows, start=2):
             r_len = len(row)
             desc_text = row[idx_desc].strip() if idx_desc < r_len else ""
-            video_url = row[idx_video].strip() if idx_video < r_len else ""
             
-            is_published = True
-            if idx_pub != -1 and idx_pub < r_len:
-                is_published = (row[idx_pub].strip().upper() == "SI")
-                
-            if desc_text and video_url and video_url.startswith("http") and is_published:
+            # Cerca il primo link video valido tra le colonne candidate per questa riga
+            video_url = ""
+            for v_idx in video_col_indices:
+                if v_idx < r_len and row[v_idx].strip().startswith("http"):
+                    video_url = row[v_idx].strip()
+                    break
+            
+            if desc_text and video_url:
                 processed_count += 1
                 
                 # Estraiamo la prima riga della descrizione come titolo pulito
