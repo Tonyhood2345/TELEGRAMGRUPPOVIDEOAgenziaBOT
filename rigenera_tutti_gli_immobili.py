@@ -10,22 +10,35 @@ SPREADSHEET_ID = "1s68pw0WEUcV0ZqltiahAqCp_r5rsycSjxKNh0VZQq_g"
 TARGET_GID = 1161427165 # GID di DATABASE_IMMOBILI (146 righe totali)
 
 def get_google_sheets_client():
-    creds_val = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-    if not creds_val:
-        raise ValueError("Variabile GOOGLE_APPLICATION_CREDENTIALS non definita.")
-    
-    # Se il valore contiene le parentesi graffe di un JSON, lo parsa direttamente come stringa
-    if creds_val.strip().startswith("{"):
-        creds_dict = json.loads(creds_val)
+    # Rileva se stiamo eseguendo lo script all'interno di Google Colab
+    in_colab = False
+    try:
+        import google.colab
+        in_colab = True
+    except ImportError:
+        pass
+
+    if in_colab:
+        print("🌐 Rilevato ambiente Google Colab. Utilizzo autenticazione integrata account Google...")
+        from google.auth import default
+        creds, _ = default()
+        return gspread.authorize(creds)
     else:
-        # Altrimenti, assume sia il percorso di un file e lo legge
-        with open(creds_val, "r", encoding="utf-8") as f:
-            creds_dict = json.load(f)
-            
-    return gspread.authorize(Credentials.from_service_account_info(
-        creds_dict, 
-        scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    ))
+        # Autenticazione standard per GitHub Actions o esecuzione locale con Service Account
+        creds_val = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        if not creds_val:
+            raise ValueError("Variabile GOOGLE_APPLICATION_CREDENTIALS non definita.")
+        
+        if creds_val.strip().startswith("{"):
+            creds_dict = json.loads(creds_val)
+        else:
+            with open(creds_val, "r", encoding="utf-8") as f:
+                creds_dict = json.load(f)
+                
+        return gspread.authorize(Credentials.from_service_account_info(
+            creds_dict, 
+            scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        ))
 
 def main():
     try:
