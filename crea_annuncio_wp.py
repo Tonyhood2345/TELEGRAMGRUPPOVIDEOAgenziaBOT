@@ -885,6 +885,19 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         f'</script>\n'
     )
     
+    social_channels_html = (
+        '\n<div class="property-social-channels" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:16px; padding:20px; margin-bottom:25px; text-align:center; font-family:\'Outfit\', sans-serif;">\n'
+        '  <h4 style="font-size:15px; color:#0f172a; margin-top:0; margin-bottom:12px; font-weight:700;">📺 Segui i Nostri Canali Social e Video</h4>\n'
+        '  <div style="display:flex; flex-wrap:wrap; gap:10px; justify-content:center;">\n'
+        '    <a href="https://www.youtube.com/@immobiliaregiancani" target="_blank" style="background:#ff0000; color:#ffffff; text-decoration:none; padding:8px 16px; border-radius:20px; font-size:12px; font-weight:700;">📺 YouTube</a>\n'
+        '    <a href="https://www.facebook.com/234931856561526" target="_blank" style="background:#1877f2; color:#ffffff; text-decoration:none; padding:8px 16px; border-radius:20px; font-size:12px; font-weight:700;">📘 Facebook</a>\n'
+        '    <a href="https://www.instagram.com/immobiliaregiancani/" target="_blank" style="background:#e1306c; color:#ffffff; text-decoration:none; padding:8px 16px; border-radius:20px; font-size:12px; font-weight:700;">📸 Instagram</a>\n'
+        '    <a href="https://www.threads.net/@immobiliaregiancani" target="_blank" style="background:#000000; color:#ffffff; text-decoration:none; padding:8px 16px; border-radius:20px; font-size:12px; font-weight:700;">🧵 Threads</a>\n'
+        '    <a href="https://www.tiktok.com/@immobiliaregiancani" target="_blank" style="background:#010101; color:#ffffff; text-decoration:none; padding:8px 16px; border-radius:20px; font-size:12px; font-weight:700;">🎵 TikTok</a>\n'
+        '  </div>\n'
+        '</div>\n'
+    )
+    
     # === ABBINAMENTO ELEMENTI NEL NUOVO ORDINE RICHIESTO ===
     full_content = (
         f"{price_header_html}\n"
