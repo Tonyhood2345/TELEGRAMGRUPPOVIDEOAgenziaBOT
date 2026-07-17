@@ -10,10 +10,18 @@ SPREADSHEET_ID = "1s68pw0WEUcV0ZqltiahAqCp_r5rsycSjxKNh0VZQq_g"
 TARGET_GID = 1161427165 # GID di DATABASE_IMMOBILI (146 righe totali)
 
 def get_google_sheets_client():
-    creds_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-    if not creds_json:
+    creds_val = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if not creds_val:
         raise ValueError("Variabile GOOGLE_APPLICATION_CREDENTIALS non definita.")
-    creds_dict = json.loads(creds_json)
+    
+    # Se il valore contiene le parentesi graffe di un JSON, lo parsa direttamente come stringa
+    if creds_val.strip().startswith("{"):
+        creds_dict = json.loads(creds_val)
+    else:
+        # Altrimenti, assume sia il percorso di un file e lo legge
+        with open(creds_val, "r", encoding="utf-8") as f:
+            creds_dict = json.load(f)
+            
     return gspread.authorize(Credentials.from_service_account_info(
         creds_dict, 
         scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -112,10 +120,6 @@ def main():
                 else:
                     print(f"  ❌ Errore durante l'esecuzione per la riga {idx}.")
                     print(f"  Logs Errore:\n{res.stderr}")
-                
-                # Nota: rimuovere o modificare questo limite se si vogliono processare tutti
-                # if processed_count >= 2:
-                #     break
                     
         print(f"\n🎉 PIPELINE COMPLETATA! Elaborati {processed_count} immobili.")
         
