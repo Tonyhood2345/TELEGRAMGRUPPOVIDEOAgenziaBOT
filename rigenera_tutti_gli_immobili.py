@@ -40,12 +40,14 @@ def main():
             return
             
         headers = [h.strip().upper() for h in all_vals[0]]
+        print("Headers trovati:", headers)
         
-        # Mappatura delle colonne basata sulla struttura del foglio
-        # ['PIANO_EDITORIALE_2026', 'DATA_PUBBLICAZIONE', 'TESTO_ORIGINALE_FB', 'TIPO_MEDIA', 'LINK_MEDIA_SORGENTE', 'STATO_EVERGREEN', 'CONTEGGIO_INTERAZIONI']
+        # Mappatura delle colonne
         idx_desc = headers.index("PIANO_EDITORIALE_2026") if "PIANO_EDITORIALE_2026" in headers else 0
         idx_fb_text = headers.index("TESTO_ORIGINALE_FB") if "TESTO_ORIGINALE_FB" in headers else idx_desc
         idx_video = headers.index("LINK_MEDIA_SORGENTE") if "LINK_MEDIA_SORGENTE" in headers else 4
+        
+        print(f"Indices: idx_desc={idx_desc}, idx_fb_text={idx_fb_text}, idx_video={idx_video}")
         
         rows = all_vals[1:]
         
@@ -56,6 +58,8 @@ def main():
             r_len = len(row)
             desc_text = row[idx_fb_text].strip() if idx_fb_text < r_len else ""
             video_url = row[idx_video].strip() if idx_video < r_len else ""
+            
+            print(f"Riga {idx} | desc_len={len(desc_text)} | video_url='{video_url}'")
             
             # Se la riga ha sia descrizione che video link, la elaboriamo
             if desc_text and video_url and video_url.startswith("http"):
@@ -70,9 +74,8 @@ def main():
                 clean_title = clean_title.strip()
                 
                 print(f"\n--- [{processed_count}] Elaborazione riga {idx}: {clean_title} ---")
-                print(f"  URL Video: {video_url}")
                 
-                # Scriviamo temporaneamente metadati.json per passargli la descrizione pulita del foglio
+                # Scriviamo temporaneamente metadati.json for crea_annuncio_wp.py
                 metadata = {
                     "title": clean_title,
                     "description": desc_text
@@ -81,25 +84,22 @@ def main():
                 with open("metadata.json", "w", encoding="utf-8") as f:
                     json.dump(metadata, f, ensure_ascii=False, indent=4)
                     
-                # Eseguiamo il .py di WordPress delegando tutto il lavoro sporco ad esso
+                # Eseguiamo il .py di WordPress
                 cmd = f'python crea_annuncio_wp.py "{video_url}"'
                 print(f"  Avvio: {cmd}")
                 
-                # Eseguiamo il processo attendendo il completamento
                 res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
                 
-                # Pulizia metadati temporanei
                 if os.path.exists("metadata.json"):
                     os.remove("metadata.json")
                     
                 if res.returncode == 0:
-                    print(f"  ✅ Completato con successo per la riga {idx}!")
-                    # Stampiamo le ultime righe dell'output per conferma
+                    print(f"  ✅ Completato per la riga {idx}!")
                     output_lines = res.stdout.strip().split('\n')
-                    for line in output_lines[-3:]:
+                    for line in output_lines[-5:]:
                         print(f"    {line}")
                 else:
-                    print(f"  ❌ Errore durante l'esecuzione del script per la riga {idx}.")
+                    print(f"  ❌ Errore alla riga {idx}.")
                     print(f"  Logs Errore:\n{res.stderr}")
                     
         print(f"\n🎉 PIPELINE COMPLETATA! Elaborati {processed_count} immobili.")
