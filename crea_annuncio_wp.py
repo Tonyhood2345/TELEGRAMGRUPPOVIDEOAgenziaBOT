@@ -158,20 +158,20 @@ def optimize_description_with_groq(original_title, original_desc):
     """Usa Groq LLM per riscrivere e ottimizzare la descrizione con stile prestigioso e senza date."""
     if not GROQ_API_KEY:
         print("Salto ottimizzazione Groq (Chiave mancante).")
-        return f"{original_title}\n\n{original_desc}\n\n✨ Immobiliare Giancani"
+        return f"{original_title}\n\n{original_desc}\n\n✨ Antonio Giancani"
         
     print("Ottimizzazione testo con Groq...")
     
     prompt_system = (
-        "Sei un broker immobiliare d'élite e copywriter professionista per Immobiliare Giancani. "
-        "Il tuo compito è ottimizzare la descrizione dell'annuncio per renderla prestigiosa, elegante, presumibilmente persuasiva e professionale. "
+        "Sei un broker immobiliare d'élite e copywriter professionista per il personal branding di Antonio Giancani. "
+        "Il tuo compito è ottimizzare la descrizione dell'annuncio per renderla prestigiosa, elegante, persuasiva e professionale. "
         "Focalizzati sulla SEO e GEO locale per la provincia di Agrigento (specialmente Favara). "
         "Usa parole chiave raffinate come 'prestigiosa residenza', 'investimento sicuro', 'ambienti luminosi e ben distribuiti', 'comfort abitativo'. "
         "Organizza il testo con elenchi puntati ed emoji eleganti per favorire la leggibilità. "
         "IMPORTANTE: Non includere MAI date di pubblicazione, scadenze o indicazioni temporali passate (es. '2026', 'febbraio 2026', 'da due mesi', ecc.) "
         "per evitare di far capire da quanto tempo l'immobile è in vendita sul mercato. "
-        "Il testo generato deve sempre terminare con la firma '✨ Immobiliare Giancani' in fondo con spaziatura doppia. "
-        "Il nome 'Antonio' NON deve comparire in nessuna parte del testo."
+        "Il testo generato deve sempre terminare con la firma '✨ Antonio Giancani' in fondo con spaziatura doppia. "
+        "NON menzionare mai il nome dell'agenzia ('Immobiliare Giancani' o 'Agenzia Giancani') per massimizzare il personal branding di Antonio Giancani."
     )
     
     user_content = f"Titolo originale: {original_title}\n\nDescrizione originale:\n{original_desc}"
@@ -197,7 +197,7 @@ def optimize_description_with_groq(original_title, original_desc):
         return optimized
     except Exception as e:
         print("Errore chiamata Groq:", str(e))
-        return f"{original_title}\n\n{original_desc}\n\n✨ Immobiliare Giancani"
+        return f"{original_title}\n\n{original_desc}\n\n✨ Antonio Giancani"
 
 def upload_photo_to_wp(photo_path):
     """Carica un file immagine su WordPress Media Library via server MCP."""
