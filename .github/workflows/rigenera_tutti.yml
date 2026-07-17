@@ -46,3 +46,11 @@ jobs:
           WP_URL: 'https://www.immobiliaregiancani.it/wp-json/easy-mcp-ai/v1/mcp'
           GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
         run: python rigenera_tutti_gli_immobili.py
+
+      - name: Commit e push di immobili.json aggiornato
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+          git add immobili.json || true
+          git commit -m "Update immobili.json [skip ci]" || true
+          git push || true
