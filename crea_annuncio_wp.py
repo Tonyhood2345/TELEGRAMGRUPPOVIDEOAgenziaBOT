@@ -526,6 +526,16 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
     # === SEZIONE 10: FORM PRENOTA UNA VISITA CON CALENDARIO DELLA SETTIMANA CORRENTE ===
     contact_box_html = (
         f'\n<div class="property-contact-box" style="background:linear-gradient(135deg, #1e293b, #0f172a); border-radius:20px; padding:25px; color:#ffffff; margin-bottom:25px; box-shadow:0 10px 25px rgba(0,0,0,0.15); font-family:\'Outfit\', sans-serif;">\n'
+        f'  \n'
+        f'  <!-- Foto Profilo Agente Antonio Giancani -->\n'
+        f'  <div style="display:flex; flex-direction:column; align-items:center; margin-bottom:20px; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:20px;">\n'
+        f'    <div style="width:100px; height:100px; border-radius:50%; overflow:hidden; border:3px solid #10b981; box-shadow:0 8px 20px rgba(16,185,129,0.3); margin-bottom:10px;">\n'
+        f'      <img src="https://www.immobiliaregiancani.it/wp-content/uploads/2026/07/antonio-giancani.jpg" alt="Antonio Giancani" style="width:100%; height:100%; object-fit:cover;" />\n'
+        f'    </div>\n'
+        f'    <div style="font-size:18px; font-weight:800; color:#ffffff; letter-spacing:0.5px;">Antonio Giancani</div>\n'
+        f'    <div style="font-size:12px; color:#10b981; font-weight:700; text-transform:uppercase; letter-spacing:1px; margin-top:2px;">Agente Immobiliare Dedicato</div>\n'
+        f'  </div>\n'
+        f'  \n'
         f'  <h3 style="font-size:20px; color:#ffffff; margin-top:0; margin-bottom:8px; text-align:center;">📞 Richiedi Informazioni o Prenota una Visita</h3>\n'
         f'  <p style="color:#94a3b8; font-size:14px; text-align:center; margin-top:0; margin-bottom:20px;">Compila i tuoi dati e seleziona uno slot orario disponibile.</p>\n'
         f'  \n'
