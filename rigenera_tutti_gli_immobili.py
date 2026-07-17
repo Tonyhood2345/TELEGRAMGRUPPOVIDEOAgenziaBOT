@@ -3,11 +3,10 @@ import sys
 import json
 import gspread
 from google.oauth2.service_account import Credentials
-
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+import re
+import subprocess
 
 SPREADSHEET_ID = "1s68pw0WEUcV0ZqltiahAqCp_r5rsycSjxKNh0VZQq_g"
-TARGET_GID = 1923610482
 
 def get_google_sheets_client():
     creds_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
@@ -24,34 +23,88 @@ def main():
         gc = get_google_sheets_client()
         sh = gc.open_by_key(SPREADSHEET_ID)
         
-        target_ws = None
+        ws = None
         for w in sh.worksheets():
-            if int(w.id) == TARGET_GID:
-                target_ws = w
+            if w.title.lower() == "piano_editorale_2026":
+                ws = w
                 break
                 
-        if not target_ws:
-            print(f"Nessun foglio trovato con GID {TARGET_GID}")
-            print("Schede disponibili:")
-            for w in sh.worksheets():
-                print(f"  - Nome: '{w.title}' | GID: {w.id}")
+        if not ws:
+            print("❌ Foglio Piano_Editoriale_2026 non trovato.")
             return
             
-        print(f"✅ Trovato foglio per GID {TARGET_GID}: '{target_ws.title}'")
-        all_vals = target_ws.get_all_values()
-        if not all_vals:
+        all_vals = ws.get_all_values()
+        if not all_vals or len(all_vals) <= 1:
             print("Il foglio è vuoto.")
             return
             
-        print("\nHeaders del foglio:")
-        print(all_vals[0])
+        headers = [h.strip().upper() for h in all_vals[0]]
         
-        print("\nPrimi 10 record:")
-        for idx, row in enumerate(all_vals[1:11], start=2):
-            print(f"  Riga {idx}: {row[:12]}")
+        # Mappatura delle colonne basata sulla struttura del foglio
+        # ['PIANO_EDITORIALE_2026', 'DATA_PUBBLICAZIONE', 'TESTO_ORIGINALE_FB', 'TIPO_MEDIA', 'LINK_MEDIA_SORGENTE', 'STATO_EVERGREEN', 'CONTEGGIO_INTERAZIONI']
+        idx_desc = headers.index("PIANO_EDITORIALE_2026") if "PIANO_EDITORIALE_2026" in headers else 0
+        idx_fb_text = headers.index("TESTO_ORIGINALE_FB") if "TESTO_ORIGINALE_FB" in headers else idx_desc
+        idx_video = headers.index("LINK_MEDIA_SORGENTE") if "LINK_MEDIA_SORGENTE" in headers else 4
+        
+        rows = all_vals[1:]
+        
+        print(f"=== ESECUZIONE PIPELINE GITHUB ACTIONS PER GLI IMMOBILI ===")
+        processed_count = 0
+        
+        for idx, row in enumerate(rows, start=2):
+            r_len = len(row)
+            desc_text = row[idx_fb_text].strip() if idx_fb_text < r_len else ""
+            video_url = row[idx_video].strip() if idx_video < r_len else ""
             
+            # Se la riga ha sia descrizione che video link, la elaboriamo
+            if desc_text and video_url and video_url.startswith("http"):
+                processed_count += 1
+                
+                # Estraiamo la prima riga della descrizione come titolo pulito
+                first_line = desc_text.split("\n")[0].strip()
+                clean_title = re.sub(r'\b\d{4}[-/]\d{2}[-/]\d{2}\b', '', first_line)
+                clean_title = re.sub(r'\b\d{2}[-/]\d{2}[-/]\d{4}\b', '', clean_title)
+                clean_title = re.sub(r'\s*-\s*$', '', clean_title.strip())
+                clean_title = re.sub(r'^\s*-\s*', '', clean_title)
+                clean_title = clean_title.strip()
+                
+                print(f"\n--- [{processed_count}] Elaborazione riga {idx}: {clean_title} ---")
+                print(f"  URL Video: {video_url}")
+                
+                # Scriviamo temporaneamente metadati.json per passargli la descrizione pulita del foglio
+                metadata = {
+                    "title": clean_title,
+                    "description": desc_text
+                }
+                
+                with open("metadata.json", "w", encoding="utf-8") as f:
+                    json.dump(metadata, f, ensure_ascii=False, indent=4)
+                    
+                # Eseguiamo il .py di WordPress delegando tutto il lavoro sporco ad esso
+                cmd = f'python crea_annuncio_wp.py "{video_url}"'
+                print(f"  Avvio: {cmd}")
+                
+                # Eseguiamo il processo attendendo il completamento
+                res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                
+                # Pulizia metadati temporanei
+                if os.path.exists("metadata.json"):
+                    os.remove("metadata.json")
+                    
+                if res.returncode == 0:
+                    print(f"  ✅ Completato con successo per la riga {idx}!")
+                    # Stampiamo le ultime righe dell'output per conferma
+                    output_lines = res.stdout.strip().split('\n')
+                    for line in output_lines[-3:]:
+                        print(f"    {line}")
+                else:
+                    print(f"  ❌ Errore durante l'esecuzione del script per la riga {idx}.")
+                    print(f"  Logs Errore:\n{res.stderr}")
+                    
+        print(f"\n🎉 PIPELINE COMPLETATA! Elaborati {processed_count} immobili.")
+        
     except Exception as e:
-        print("Errore:", str(e))
+        print("Errore generale durante la rigenerazione:", str(e))
 
 if __name__ == "__main__":
     main()
