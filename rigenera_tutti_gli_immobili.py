@@ -7,6 +7,7 @@ import re
 import subprocess
 
 SPREADSHEET_ID = "1s68pw0WEUcV0ZqltiahAqCp_r5rsycSjxKNh0VZQq_g"
+TARGET_GID = 1923610482
 
 def get_google_sheets_client():
     creds_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
@@ -25,12 +26,12 @@ def main():
         
         ws = None
         for w in sh.worksheets():
-            if w.title.lower() == "piano_editorale_2026":
+            if int(w.id) == TARGET_GID:
                 ws = w
                 break
                 
         if not ws:
-            print("❌ Foglio Piano_Editoriale_2026 non trovato.")
+            print(f"❌ Foglio con GID {TARGET_GID} non trovato.")
             return
             
         all_vals = ws.get_all_values()
