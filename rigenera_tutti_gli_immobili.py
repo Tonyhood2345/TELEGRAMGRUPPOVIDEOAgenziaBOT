@@ -6,6 +6,7 @@ from google.oauth2.service_account import Credentials
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+MAIN_SHEET_ID = "19m1cStsqyCvzz3-AYFJKPnrLPNaDuCXEKM8Fka76-Hc"
 LOG_SHEET_ID = "1s68pw0WEUcV0ZqltiahAqCp_r5rsycSjxKNh0VZQq_g"
 
 def get_google_sheets_client():
@@ -21,29 +22,16 @@ def get_google_sheets_client():
 def main():
     try:
         gc = get_google_sheets_client()
-        sh = gc.open_by_key(LOG_SHEET_ID)
         
-        ws = None
-        for w in sh.worksheets():
-            if w.title.lower() == "piano_editorale_2026":
-                ws = w
-                break
-                
-        if not ws:
-            print("Piano_editorale_2026 non trovato.")
-            return
+        print(f"=== SCHEDE IN MAIN ({MAIN_SHEET_ID}) ===")
+        sh_main = gc.open_by_key(MAIN_SHEET_ID)
+        for w in sh_main.worksheets():
+            print(f"  - {w.title}")
             
-        all_vals = ws.get_all_values()
-        headers = [h.strip().upper() for h in all_vals[0]]
-        
-        # Stampiamo i dati completi di ogni riga attiva (da riga 173 a 182)
-        for idx in range(173, 183):
-            row = all_vals[idx - 1]
-            print(f"\n=== RIGA {idx} ===")
-            for h, val in zip(headers, row):
-                if val.strip():
-                    print(f"  {h}: '{val}'")
-            print("-" * 50)
+        print(f"\n=== SCHEDE IN LOG ({LOG_SHEET_ID}) ===")
+        sh_log = gc.open_by_key(LOG_SHEET_ID)
+        for w in sh_log.worksheets():
+            print(f"  - {w.title}")
             
     except Exception as e:
         print("Errore:", str(e))
