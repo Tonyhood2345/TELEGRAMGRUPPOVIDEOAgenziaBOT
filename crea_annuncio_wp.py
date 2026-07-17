@@ -257,7 +257,7 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
     # === SEZIONE 3: CONTENUTO / DESCRIZIONE ===
     description_html = f'<div class="property-description" style="font-size:15px; line-height:1.7; color:#334155; margin-bottom:30px;">{content}</div>'
 
-    # === SEZIONE 3.2: VIDEO DI YOUTUBE (INSERITO DOPO LA DESCRIZIONE IN UNA FINESTRA CON CLICCA E VEDI) ===
+    # === SEZIONE 3.2: VIDEO DI YOUTUBE O DIRECT MP4 (INSERITO DOPO LA DESCRIZIONE IN UNA FINESTRA CON CLICCA E VEDI) ===
     video_id = ""
     if "youtube.com" in video_url or "youtu.be" in video_url:
         if "watch?v=" in video_url:
@@ -273,7 +273,20 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
             f'    <h3 style="font-size:18px; color:#0f172a; margin:0; font-weight:700; display:flex; align-items:center; gap:8px;">🎬 Video Tour dell\'Immobile</h3>\n'
             f'    <span style="background:#ef4444; color:#ffffff; padding:4px 10px; font-size:11px; font-weight:700; border-radius:12px; text-transform:uppercase; animation: pulse 1.5s infinite;">clicca e vedi</span>\n'
             f'  </div>\n'
-            f'  <iframe width="100%" height="450" src="https://www.youtube.com/embed/{video_id}" frameborder="0" allowfullscreen style="border-radius:12px; box-shadow:0 10px 20px rgba(0,0,0,0.05); display:block;"></iframe>\n'
+            f'  <iframe width="100%" height="450" src="https://www.youtube.com/embed/{video_id}?autoplay=1&mute=1" frameborder="0" allowfullscreen style="border-radius:12px; box-shadow:0 10px 20px rgba(0,0,0,0.05); display:block;"></iframe>\n'
+            f'</div>\n'
+        )
+    elif video_url:
+        video_html = (
+            f'\n<div class="property-video-container" style="margin-top:20px; margin-bottom:30px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:16px; padding:20px; font-family:\'Outfit\', sans-serif;">\n'
+            f'  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:15px; flex-wrap:wrap; gap:10px;">\n'
+            f'    <h3 style="font-size:18px; color:#0f172a; margin:0; font-weight:700; display:flex; align-items:center; gap:8px;">🎬 Video Tour dell\'Immobile</h3>\n'
+            f'    <span style="background:#ef4444; color:#ffffff; padding:4px 10px; font-size:11px; font-weight:700; border-radius:12px; text-transform:uppercase; animation: pulse 1.5s infinite;">clicca e vedi</span>\n'
+            f'  </div>\n'
+            f'  <video width="100%" height="450" autoplay muted loop playsinline controls style="border-radius:12px; box-shadow:0 10px 20px rgba(0,0,0,0.05); display:block; object-fit:cover;">\n'
+            f'    <source src="{video_url}" type="video/mp4">\n'
+            f'    Il tuo browser non supporta la riproduzione video.\n'
+            f'  </video>\n'
             f'</div>\n'
         )
 
