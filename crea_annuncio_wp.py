@@ -708,9 +708,9 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         f'    }}\n'
         f'  </style>\n'
         f'  \n'
-        f'  <!-- 1. FUMETTO NOTIFICA TEMPORIZZATO (PRECISO: Ciao Sono qui per aiutarti!!) -->\n'
-        f'  <div id="daria-bubble" style="display:none; position:absolute; bottom:85px; right:0; width:180px; background:#0f172a; color:#ffffff; padding:12px 16px; border-radius:16px; font-size:13px; line-height:1.4; box-shadow:0 8px 20px rgba(0,0,0,0.2); transition:all 0.4s ease; transform:translateY(10px); opacity:0; z-index:10; font-weight:700; text-align:center;">\n'
-        f'    Ciao Sono qui per aiutarti!!\n'
+        f'  <!-- 1. FUMETTO NOTIFICA TEMPORIZZATO -->\n'
+        f'  <div id="daria-bubble" onclick="openDariaDrawer()" style="display:none; position:absolute; bottom:85px; right:0; width:180px; background:#0f172a; color:#ffffff; padding:12px 16px; border-radius:16px; font-size:13px; line-height:1.4; box-shadow:0 8px 20px rgba(0,0,0,0.2); transition:all 0.4s ease; transform:translateY(10px); opacity:0; z-index:10; font-weight:700; text-align:center; cursor:pointer;">\n'
+        f'    hei sono qui per aiutarti!! Cliccami\n'
         f'    <div style="position:absolute; bottom:-6px; right:25px; width:12px; height:12px; background:#0f172a; transform:rotate(45deg);"></div>\n'
         f'  </div>\n'
         f'  \n'
@@ -898,6 +898,20 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         '</div>\n'
     )
     
+    # === RIMUOVIAMO NEWLINES DA ELEMENTI CON SCRIPT O STYLE PER EVITARE CHE WPAUTOP LI ROMPA ===
+    daria_cleaned = daria_sticky_widget_html
+    daria_cleaned = daria_cleaned.replace("// Mostra il fumetto dopo un paio di secondi (2 secondi esatti)", "/* Mostra il fumetto dopo un paio di secondi (2 secondi esatti) */")
+    daria_cleaned = daria_cleaned.replace("// Scompare dopo 6 secondi", "/* Scompare dopo 6 secondi */")
+    daria_cleaned = daria_cleaned.replace("// Gestione messaggi chat locale + Apps Script", "/* Gestione messaggi chat locale + Apps Script */")
+    daria_cleaned = daria_cleaned.replace("// Mostra indicatore di scrittura", "/* Mostra indicatore di scrittura */")
+    daria_cleaned = daria_cleaned.replace("// Richiesta a Google Apps Script per risposta dinamica", "/* Richiesta a Google Apps Script per risposta dinamica */")
+    daria_cleaned = daria_cleaned.replace("// In caso di errore CORS o rete, rispondi con l'AI locale del browser", "/* In caso di errore CORS o rete, rispondi con l'AI locale del browser */")
+    
+    ape_badge_html_clean = ape_badge_html.replace('\n', ' ').replace('\r', ' ')
+    mortgage_calculator_html_clean = mortgage_calculator_html.replace('\n', ' ').replace('\r', ' ')
+    contact_box_html_clean = contact_box_html.replace('\n', ' ').replace('\r', ' ')
+    daria_sticky_widget_html_clean = daria_cleaned.replace('\n', ' ').replace('\r', ' ')
+
     # === ABBINAMENTO ELEMENTI NEL NUOVO ORDINE RICHIESTO ===
     full_content = (
         f"{price_header_html}\n"
@@ -906,15 +920,15 @@ def create_wp_listing(title, content, featured_media_id, images_urls, video_url)
         f"{video_html}\n"
         f"{fallback_price_html}\n"
         f"{mortgage_summary_html}\n"
-        f"{ape_badge_html}\n"
+        f"{ape_badge_html_clean}\n"
         f"{map_html}\n"
         f"{geo_desc_html}\n"
         f"{planimetry_html}\n"
-        f"{mortgage_calculator_html}\n"
-        f"{contact_box_html}\n"
+        f"{mortgage_calculator_html_clean}\n"
+        f"{contact_box_html_clean}\n"
         f"{social_channels_html}\n"
         f"{logo_html}\n"
-        f"{daria_sticky_widget_html}"
+        f"{daria_sticky_widget_html_clean}"
     )
     
     # === FORZATURA LARGHEZZA PIENA (RIMOZIONE SIDEBAR ASTRA) VIA META ===
