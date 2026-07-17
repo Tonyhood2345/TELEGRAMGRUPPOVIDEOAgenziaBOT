@@ -18,44 +18,25 @@ def get_google_sheets_client():
         scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     ))
 
-def rigenera_tutto():
+def main():
     try:
         gc = get_google_sheets_client()
         sh = gc.open_by_key(SPREADSHEET_ID)
         
-        print("Tutte le schede disponibili nel foglio:")
+        print("=== INFO FOGLI ===")
         for w in sh.worksheets():
-            print(f" - {w.title}")
-            
-        # Proviamo a caricare DATABASE_IMMOBILI
-        ws = None
-        for name in ["DATABASE_IMMOBILI", "DB_IMMOBILI", "Piano_Editoriale_2026", "ANNUNCI_ATTIVI", "Foglio1"]:
-            try:
-                ws = sh.worksheet(name)
-                print(f"\n✅ Foglio selezionato per test: {name}")
-                break
-            except Exception:
-                continue
-                
-        if not ws:
-            print("Nessun foglio trovato.")
-            return
-            
-        all_values = ws.get_all_values()
-        if not all_values:
-            print("Il foglio è vuoto.")
-            return
-            
-        print("\nIntestazioni (Headers):")
-        for idx, h in enumerate(all_values[0]):
-            print(f"  Colonna {idx} (Lettera {chr(65+idx)}): '{h}'")
-            
-        print("\nPrimi 5 record di dati:")
-        for idx, row in enumerate(all_values[1:6], start=2):
-            print(f"  Riga {idx}: {row[:15]}")
+            all_vals = w.get_all_values()
+            row_count = len(all_vals)
+            col_count = len(all_vals[0]) if all_vals else 0
+            print(f"Foglio: '{w.title}' | Righe: {row_count} | Colonne: {col_count}")
+            if row_count > 0:
+                print(f"  Headers: {all_vals[0][:10]}")
+                if row_count > 1:
+                    print(f"  Riga 2 : {all_vals[1][:10]}")
+            print("-" * 50)
             
     except Exception as e:
         print("Errore:", str(e))
 
 if __name__ == "__main__":
-    rigenera_tutto()
+    main()
