@@ -70,6 +70,7 @@ def rigenera_tutto():
         return
         
     headers = [str(h).strip().upper() for h in raw_data[0]]
+    print(f"DEBUG: Headers del foglio: {headers}")
     
     def get_col_idx(names, default):
         for name in names:
@@ -98,6 +99,9 @@ def rigenera_tutto():
         stato = row[idx_stato].strip().upper() if idx_stato < r_len else ""
         testo = row[idx_testo].strip() if idx_testo < r_len else ""
         
+        if idx <= 8:
+            print(f"DEBUG Riga {idx}: idx_stato={idx_stato} (valore='{stato}'), idx_testo={idx_testo} (lunghezza testo={len(testo)})")
+            
         if not (testo and stato in ("SI", "ATTIVO", "DISPONIBILE", "PUBBLICATO")):
             continue
 
