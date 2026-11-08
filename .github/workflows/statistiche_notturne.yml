@@ -2,8 +2,8 @@ name: Bot Statistiche Notturno
 
 # Si attiva in automatico alle 03:00 di notte (ora italiana)
 on:
-  schedule:
-    - cron: '0 2 * * *'
+# [KILL SWITCH META DISATTIVATO]   schedule:
+# [KILL SWITCH META DISATTIVATO]     - cron: '0 2 * * *'
   # Questo pulsante ti permette di avviarlo manualmente quando vuoi per testarlo!
   workflow_dispatch: 
 

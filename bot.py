@@ -313,7 +313,19 @@ def get_facebook_video_direct_url(video_id):
 # ═══════════════════════════════════════════
 
 def upload_facebook(video_file, descrizione):
-    """Upload video su Facebook Page."""
+    """Upload video su Facebook Page (BLOCCATO & CONVOGLIATO SU TELEGRAM)."""
+    print("⛔ [KILL SWITCH META] upload_facebook bloccata. Convoglio su Telegram...")
+    try:
+        res_tg = send_telegram(video_file, f"📢 *[VIDEO IMMOBILE — CONVOGLIATO SU TELEGRAM]*
+_(Meta bloccato)_
+
+{descrizione}")
+        return res_tg or "https://t.me/convogliato_su_telegram"
+    except Exception as e:
+        print(f"⚠️ Errore invio Telegram: {e}")
+        return "https://t.me/convogliato_su_telegram"
+
+def upload_facebook_ORIGINALE(video_file, descrizione):
     print("📘 Upload Facebook...")
     testo = descrizione + BRANDING
     try:
@@ -1488,7 +1500,19 @@ def download_foto_da_drive(drive_service, link_foto_drive):
 
 
 def upload_facebook_foto(foto_files, commento):
-    """Pubblica un post (singolo o carosello) con foto su Facebook Page."""
+    """Pubblica un post (singolo o carosello) con foto su Facebook Page (BLOCCATO & CONVOGLIATO SU TELEGRAM)."""
+    print("⛔ [KILL SWITCH META] upload_facebook_foto bloccata. Convoglio su Telegram...")
+    try:
+        res_tg = invia_telegram_foto(foto_files, f"📢 *[FOTO IMMOBILE — CONVOGLIATE SU TELEGRAM]*
+_(Meta bloccato)_
+
+{commento}")
+        return res_tg or "https://t.me/convogliato_su_telegram"
+    except Exception as e:
+        print(f"⚠️ Errore invio foto Telegram: {e}")
+        return "https://t.me/convogliato_su_telegram"
+
+def upload_facebook_foto_ORIGINALE(foto_files, commento):
     print("📘 Upload Foto Facebook Page...")
     if not FB_PAGE_ID or not FB_PAGE_TOKEN:
         print("⚠️ Facebook Page ID o Token mancanti")

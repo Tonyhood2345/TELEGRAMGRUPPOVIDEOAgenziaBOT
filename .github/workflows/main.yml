@@ -35,8 +35,8 @@ on:
         description: 'JSON con link gia pubblicati'
         required: false
         default: '{}'
-  schedule:
-    - cron: '30 10 * * 2,5'
+# [KILL SWITCH META DISATTIVATO]   schedule:
+# [KILL SWITCH META DISATTIVATO]     - cron: '30 10 * * 2,5'
 
 jobs:
   run-bot:
