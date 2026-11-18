@@ -35,8 +35,8 @@ on:
         description: 'JSON con link gia pubblicati'
         required: false
         default: '{}'
-# [KILL SWITCH META DISATTIVATO]   schedule:
-# [KILL SWITCH META DISATTIVATO]     - cron: '30 10 * * 2,5'
+  schedule:
+    - cron: '30 10 * * 2,5'
 
 jobs:
   run-bot:
@@ -69,25 +69,18 @@ jobs:
       - name: Esecuzione dello script Python
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
-          FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
-          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
           YT2_CLIENT_ID: ${{ secrets.YT2_CLIENT_ID }}
           YT2_CLIENT_SECRET: ${{ secrets.YT2_CLIENT_SECRET }}
           YT2_REFRESH_TOKEN: ${{ secrets.YT2_REFRESH_TOKEN }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
-          IG_USER_ID: ${{ secrets.IG_USER_ID }}
-          WHATSAPP_TOKEN: ${{ secrets.WHATSAPP_TOKEN }}
-          WHATSAPP_PHONE_ID: ${{ secrets.WHATSAPP_PHONE_ID }}
           BOSS_PHONE: ${{ secrets.BOSS_PHONE }}
           WP_URL: ${{ secrets.WP_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_PASSWORD: ${{ secrets.WP_PASSWORD }}
           GMB_ACCOUNT_ID: ${{ secrets.GMB_ACCOUNT_ID }}
           GMB_LOCATION_ID: ${{ secrets.GMB_LOCATION_ID }}
-          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
-          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
           INPUT_JOB_ID: ${{ github.event.inputs.job_id }}
           INPUT_VIDEO_URL: ${{ github.event.inputs.video_url }}
           INPUT_SEO_TITLE: ${{ github.event.inputs.seo_title }}
