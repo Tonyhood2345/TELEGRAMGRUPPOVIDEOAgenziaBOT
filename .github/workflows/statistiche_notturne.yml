@@ -2,8 +2,8 @@ name: Bot Statistiche Notturno
 
 # Si attiva in automatico alle 03:00 di notte (ora italiana)
 on:
-# [KILL SWITCH META DISATTIVATO]   schedule:
-# [KILL SWITCH META DISATTIVATO]     - cron: '0 2 * * *'
+  schedule:
+    - cron: '0 2 * * *'
   # Questo pulsante ti permette di avviarlo manualmente quando vuoi per testarlo!
   workflow_dispatch: 
 
@@ -33,8 +33,6 @@ jobs:
     - name: Esegui il Commercialista Notturno 🦉
       env:
         GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
-        FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
-        FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
         YT2_CLIENT_ID: ${{ secrets.YT2_CLIENT_ID }}
         YT2_CLIENT_SECRET: ${{ secrets.YT2_CLIENT_SECRET }}
         YT2_REFRESH_TOKEN: ${{ secrets.YT2_REFRESH_TOKEN }}
