@@ -286,74 +286,17 @@ def extract_facebook_video_id(url):
 
 
 def get_facebook_video_direct_url(video_id):
-    """Interroga la Graph API di Facebook per ottenere il link CDN directo al file video MP4."""
-    if not video_id or not FB_PAGE_TOKEN:
-        return ""
-    try:
-        url = f"https://graph.facebook.com/v21.0/{video_id}"
-        params = {
-            'fields': 'source',
-            'access_token': FB_PAGE_TOKEN
-        }
-        r = requests.get(url, params=params, timeout=20)
-        if r.status_code == 200:
-            direct_url = r.json().get('source', '')
-            if direct_url:
-                print(f"🎬 URL video diretto Facebook trovato: {direct_url[:50]}...")
-                return direct_url
-        else:
-            print(f"⚠️ Errore Graph API recupero sorgente video {video_id}: {r.text[:150]}")
-    except Exception as e:
-        print(f"⚠️ Errore recupero direct link FB: {e}")
+    """Disattivato: nessuna chiamata a Meta Graph API."""
     return ""
-
 
 # ═══════════════════════════════════════════
 # UPLOAD PER PIATTAFORMA
 # ═══════════════════════════════════════════
 
 def upload_facebook(video_file, descrizione):
-    """Upload video su Facebook Page (BLOCCATO & CONVOGLIATO SU TELEGRAM)."""
-    print("⛔ [KILL SWITCH META] upload_facebook bloccata. Convoglio su Telegram...")
-    try:
-        res_tg = send_telegram(video_file, f"📢 *[VIDEO IMMOBILE — CONVOGLIATO SU TELEGRAM]*
-_(Meta bloccato)_
-
-{descrizione}")
-        return res_tg or "https://t.me/convogliato_su_telegram"
-    except Exception as e:
-        print(f"⚠️ Errore invio Telegram: {e}")
-        return "https://t.me/convogliato_su_telegram"
-
-def upload_facebook_ORIGINALE(video_file, descrizione):
-    print("📘 Upload Facebook...")
-    testo = descrizione + BRANDING
-    try:
-        fb_url = f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}/videos"
-        with open(video_file, 'rb') as f:
-            r = requests.post(
-                fb_url,
-                data={'access_token': FB_PAGE_TOKEN, 'description': testo},
-                files={'source': f},
-                timeout=300
-            )
-        if r.status_code == 200:
-            video_id = r.json().get('id', '')
-            link = f"https://www.facebook.com/{FB_PAGE_ID}/videos/{video_id}"
-            print(f"✅ Facebook pubblicato: {link}")
-            
-            # Cerca e memorizza immediatamente la URL del file MP4 diretto per Instagram Reels
-            global LATEST_FB_VIDEO_DIRECT_URL
-            LATEST_FB_VIDEO_DIRECT_URL = get_facebook_video_direct_url(video_id)
-            
-            return link
-        else:
-            print(f"❌ Errore Facebook ({r.status_code}): {r.text[:200]}")
-            return ""
-    except Exception as e:
-        print(f"❌ Errore Facebook: {e}")
-        return ""
-
+    """Upload Facebook disattivato: attivo solo Telegram."""
+    print("🔒 [SOLO TELEGRAM] Upload Facebook disattivato.")
+    return "skip (solo Telegram)"
 
 def upload_youtube(youtube, video_file, titolo, descrizione):
     """Upload video su YouTube come Short."""
@@ -386,173 +329,14 @@ def upload_youtube(youtube, video_file, titolo, descrizione):
 
 
 def upload_instagram_reel(video_file, caption, fb_video_url=""):
-    """Upload Instagram Reel via IG Content Publishing API."""
-    print("📸 Upload Instagram Reel...")
-    if not IG_USER_ID or not FB_PAGE_TOKEN:
-        print("⚠️ Instagram: credenziali mancanti (IG_USER_ID o FB_PAGE_TOKEN)")
-        return ""
-
-    testo = caption + BRANDING
-
-    # Instagram richiede un URL pubblico del video.
-    video_url_for_ig = ""
-    if fb_video_url:
-        video_url_for_ig = fb_video_url
-    else:
-        print("⚠️ Instagram: serve un URL pubblico del video. Uso fallback upload diretto...")
-        if INPUT_VIDEO_URL and INPUT_VIDEO_URL.startswith("http"):
-            video_url_for_ig = INPUT_VIDEO_URL
-        else:
-            print("❌ Instagram: nessun URL pubblico disponibile, skip")
-            return ""
-
-    try:
-        # Step 1: Crea container
-        create_url = f"https://graph.facebook.com/v21.0/{IG_USER_ID}/media"
-        create_data = {
-            'media_type': 'REELS',
-            'video_url': video_url_for_ig,
-            'caption': testo[:2200],
-            'access_token': FB_PAGE_TOKEN
-        }
-        r1 = requests.post(create_url, data=create_data, timeout=60)
-        if r1.status_code != 200:
-            print(f"❌ IG container error ({r1.status_code}): {r1.text[:200]}")
-            return ""
-
-        container_id = r1.json().get('id')
-        print(f"📦 IG Container creato: {container_id}")
-
-        # Step 2: Poll
-        status_url = f"https://graph.facebook.com/v21.0/{container_id}"
-        for attempt in range(60):
-            time.sleep(5)
-            r_status = requests.get(
-                status_url,
-                params={'fields': 'status_code', 'access_token': FB_PAGE_TOKEN},
-                timeout=30
-            )
-            if r_status.status_code == 200:
-                status = r_status.json().get('status_code', '')
-                if status == 'FINISHED':
-                    print(f"✅ IG Container pronto (tentativo {attempt + 1})")
-                    break
-                elif status == 'ERROR':
-                    print(f"❌ IG Container in errore")
-                    return ""
-                else:
-                    if attempt % 6 == 0:
-                        print(f"⏳ IG Container status: {status} (tentativo {attempt + 1})")
-        else:
-            print("❌ IG Container timeout dopo 5 minuti")
-            return ""
-
-        # Step 3: Pubblica
-        publish_url = f"https://graph.facebook.com/v21.0/{IG_USER_ID}/media_publish"
-        r3 = requests.post(
-            publish_url,
-            data={'creation_id': container_id, 'access_token': FB_PAGE_TOKEN},
-            timeout=60
-        )
-        if r3.status_code == 200:
-            media_id = r3.json().get('id', '')
-            link = f"https://www.instagram.com/reel/{media_id}/"
-            print(f"✅ Instagram Reel pubblicato: {link}")
-            return link
-        else:
-            print(f"❌ IG publish error ({r3.status_code}): {r3.text[:200]}")
-            return ""
-
-    except Exception as e:
-        print(f"❌ Errore Instagram: {e}")
-        return ""
-
+    """Upload Instagram disattivato: attivo solo Telegram."""
+    print("🔒 [SOLO TELEGRAM] Upload Instagram Reel disattivato.")
+    return "skip (solo Telegram)"
 
 def upload_threads(video_file, caption, fb_video_url=""):
-    """Upload Threads Post via Threads API (similar to IG Reels)."""
-    print("🧵 Upload Threads...")
-    threads_token = os.environ.get("THREADS_ACCESS_TOKEN")
-    threads_user_id = os.environ.get("THREADS_USER_ID")
-    
-    if not threads_token or not threads_user_id:
-        print("⚠️ Threads: credenziali mancanti (THREADS_ACCESS_TOKEN o THREADS_USER_ID), skip")
-        return "skip"
-
-    testo = caption + BRANDING
-
-    # Richiede URL pubblico del video
-    video_url_for_threads = ""
-    if fb_video_url:
-        video_url_for_threads = fb_video_url
-    else:
-        print("⚠️ Threads: serve un URL pubblico del video. Uso fallback...")
-        if INPUT_VIDEO_URL and INPUT_VIDEO_URL.startswith("http"):
-            video_url_for_threads = INPUT_VIDEO_URL
-        else:
-            print("❌ Threads: nessun URL pubblico disponibile, skip")
-            return ""
-
-    try:
-        # Step 1: Crea container
-        create_url = f"https://graph.threads.net/v1.0/{threads_user_id}/threads"
-        create_data = {
-            'media_type': 'VIDEO',
-            'video_url': video_url_for_threads,
-            'text': testo[:500], # Threads ha un limite di caratteri di 500
-            'access_token': threads_token
-        }
-        r1 = requests.post(create_url, data=create_data, timeout=60)
-        if r1.status_code != 200:
-            print(f"❌ Threads container error ({r1.status_code}): {r1.text[:200]}")
-            return ""
-
-        container_id = r1.json().get('id')
-        print(f"📦 Threads Container creato: {container_id}")
-
-        # Step 2: Poll status
-        status_url = f"https://graph.threads.net/v1.0/{container_id}"
-        for attempt in range(60):
-            time.sleep(5)
-            r_status = requests.get(
-                status_url,
-                params={'fields': 'status_code', 'access_token': threads_token},
-                timeout=30
-            )
-            if r_status.status_code == 200:
-                status = r_status.json().get('status_code', '')
-                if status == 'FINISHED':
-                    print(f"✅ Threads Container pronto (tentativo {attempt + 1})")
-                    break
-                elif status == 'ERROR':
-                    print(f"❌ Threads Container in errore")
-                    return ""
-                else:
-                    if attempt % 6 == 0:
-                        print(f"⏳ Threads Container status: {status} (tentativo {attempt + 1})")
-        else:
-            print("❌ Threads Container timeout dopo 5 minuti")
-            return ""
-
-        # Step 3: Pubblica
-        publish_url = f"https://graph.threads.net/v1.0/{threads_user_id}/threads_publish"
-        r3 = requests.post(
-            publish_url,
-            data={'creation_id': container_id, 'access_token': threads_token},
-            timeout=60
-        )
-        if r3.status_code == 200:
-            media_id = r3.json().get('id', '')
-            link = f"https://www.threads.net/post/{media_id}"
-            print(f"✅ Threads pubblicato: {link}")
-            return link
-        else:
-            print(f"❌ Threads publish error ({r3.status_code}): {r3.text[:200]}")
-            return ""
-
-    except Exception as e:
-        print(f"❌ Errore Threads: {e}")
-        return ""
-
+    """Upload Threads disattivato: attivo solo Telegram."""
+    print("🔒 [SOLO TELEGRAM] Upload Threads disattivato.")
+    return "skip (solo Telegram)"
 
 def send_telegram(video_file, caption, channel=True):
     """Invia video su Telegram (canale o chat personale) con gestione errori di parsing HTML."""
@@ -716,83 +500,23 @@ def upload_wordpress(title, description, video_url=None):
 
 
 def send_whatsapp_report(risultati, indirizzo):
-    """Invia report strutturato al Boss via WhatsApp Business API."""
-    if not WHATSAPP_TOKEN or not WHATSAPP_PHONE_ID or not BOSS_PHONE:
-        print("⚠️ WhatsApp: credenziali mancanti, skip report")
-        return
-
-    print("🟢 Invio report WhatsApp al Boss...")
-
-    def badge(key, label, emoji):
-        val = risultati.get(key, "")
-        if val == "skip":
-            return f"{emoji} {label}: ⏭️ Già presente"
-        elif val and val != "":
-            link_part = f" → {val}" if val != "ok" else ""
-            return f"{emoji} {label}: ✅ Pubblicato{link_part}"
-        else:
-            return f"{emoji} {label}: ❌ Errore"
-
+    """Report pubblicazione inviato solo su Telegram (WhatsApp/Meta disattivati)."""
     lines = [
-        "📊 *REPORT PUBBLICAZIONE IMMOBILE*",
-        "",
-        badge("youtube", "YouTube", "📺"),
-        badge("facebook", "Facebook", "📘"),
-        badge("instagram", "Instagram", "📸"),
-        badge("telegram", "Telegram", "✈️"),
-        badge("threads", "Threads", "🧵"),
-        badge("wordpress", "Sito Web", "🌐"),
-        badge("gmb", "Google Business", "🏢"),
-        "",
-        f"📍 *Indirizzo:* {indirizzo or 'N/D'}",
-        f"📅 *Data:* {datetime.now().strftime('%d/%m/%Y %H:%M')}",
-        "",
-        "✨ *Antonio Giancani*"
+        "📊 *REPORT PUBBLICAZIONE IMMOBILE (SOLO TELEGRAM)*",
+        f"📍 {indirizzo}" if indirizzo else "",
+        f"✈️ Telegram: {'✅ Inviato' if risultati.get('telegram') else '⏭️ Saltato'}",
+        f"▶️ YouTube: {risultati.get('youtube') or '⏭️ Saltato'}",
+        f"🌐 WordPress: {risultati.get('wordpress') or '⏭️ Saltato'}",
+        f"🏢 Google Business: {risultati.get('gmb') or '⏭️ Saltato'}",
     ]
-
-    testo = "\n".join(lines)
-
-    try:
-        url = f"https://graph.facebook.com/v21.0/{WHATSAPP_PHONE_ID}/messages"
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": BOSS_PHONE,
-            "type": "text",
-            "text": {"body": testo}
-        }
-        r = requests.post(
-            url,
-            headers={
-                "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-                "Content-Type": "application/json"
-            },
-            json=payload,
-            timeout=30
-        )
-        if r.status_code == 200:
-            print("✅ Report WhatsApp inviato al Boss!")
-        else:
-            print(f"⚠️ WhatsApp report ({r.status_code}): {r.text[:200]}")
-    except Exception as e:
-        print(f"⚠️ Errore WhatsApp report: {e}")
-
-    # Invio di sicurezza di backup anche su Telegram personale (solo se non è un gruppo o canale e se differisce dal canale pubblico)
-    is_group_or_channel = str(CHAT_ID).startswith("-")
-    is_same_as_channel = str(CHAT_ID) == str(TELEGRAM_CHANNEL_ID)
-    
-    if TELEGRAM_TOKEN and CHAT_ID and not is_group_or_channel and not is_same_as_channel:
+    report_text = "\n".join([l for l in lines if l])
+    if TELEGRAM_TOKEN and CHAT_ID and str(CHAT_ID) != str(TELEGRAM_CHANNEL_ID):
         try:
-            print("🟢 Invio report Telegram di sicurezza al Boss...")
             tg_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-            # Pulizia markdown per evitare errori di parse
-            testo_tg = testo.replace("*", "").replace("_", "")
-            requests.post(tg_url, data={"chat_id": CHAT_ID, "text": testo_tg}, timeout=15)
-            print("✅ Report Telegram inviato con successo!")
-        except Exception as etg:
-            print(f"⚠️ Errore invio report di sicurezza Telegram: {etg}")
-    else:
-        print("⏭️ Backup Report Telegram saltato (CHAT_ID coincide con il canale o è un gruppo pubblico)")
-
+            requests.post(tg_url, data={"chat_id": CHAT_ID, "text": report_text, "parse_mode": "Markdown"}, timeout=15)
+            print("✅ Report Telegram inviato al Boss!")
+        except Exception as e_tg:
+            print(f"⚠️ Errore invio report Telegram: {e_tg}")
 
 def callback_daria(url, payload):
     """Invia risultati alla DarIA WebApp via POST callback."""
@@ -1500,160 +1224,14 @@ def download_foto_da_drive(drive_service, link_foto_drive):
 
 
 def upload_facebook_foto(foto_files, commento):
-    """Pubblica un post (singolo o carosello) con foto su Facebook Page (BLOCCATO & CONVOGLIATO SU TELEGRAM)."""
-    print("⛔ [KILL SWITCH META] upload_facebook_foto bloccata. Convoglio su Telegram...")
-    try:
-        res_tg = invia_telegram_foto(foto_files, f"📢 *[FOTO IMMOBILE — CONVOGLIATE SU TELEGRAM]*
-_(Meta bloccato)_
-
-{commento}")
-        return res_tg or "https://t.me/convogliato_su_telegram"
-    except Exception as e:
-        print(f"⚠️ Errore invio foto Telegram: {e}")
-        return "https://t.me/convogliato_su_telegram"
-
-def upload_facebook_foto_ORIGINALE(foto_files, commento):
-    print("📘 Upload Foto Facebook Page...")
-    if not FB_PAGE_ID or not FB_PAGE_TOKEN:
-        print("⚠️ Facebook Page ID o Token mancanti")
-        return ""
-    
-    testo = commento + BRANDING
-    try:
-        # Se c'è una sola foto, pubblichiamo in modalità singola
-        if len(foto_files) == 1:
-            url = f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}/photos"
-            with open(foto_files[0], 'rb') as f:
-                r = requests.post(url, data={'access_token': FB_PAGE_TOKEN, 'caption': testo}, files={'source': f}, timeout=120)
-            if r.status_code == 200:
-                post_id = r.json().get('post_id', r.json().get('id', ''))
-                link = f"https://www.facebook.com/{post_id}"
-                print(f"✅ Post FB pubblicato con successo: {link}")
-                return link
-            else:
-                print(f"❌ Errore pubblicazione foto FB ({r.status_code}): {r.text}")
-                return ""
-        
-        # Se ci sono più foto, carichiamo le foto non pubblicate (published=false) e poi creiamo il post (feed) allegandole
-        media_ids = []
-        for file_path in foto_files:
-            url = f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}/photos"
-            with open(file_path, 'rb') as f:
-                r = requests.post(url, data={'access_token': FB_PAGE_TOKEN, 'published': 'false'}, files={'source': f}, timeout=120)
-            if r.status_code == 200:
-                media_ids.append(r.json().get('id'))
-            else:
-                print(f"⚠️ Errore caricamento foto FB temporanea ({r.status_code}): {r.text}")
-        
-        if not media_ids:
-            print("❌ Nessuna foto caricata su FB")
-            return ""
-            
-        # Pubblica il post
-        url_feed = f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}/feed"
-        attached_media = [{"media_fbid": m_id} for m_id in media_ids]
-        payload = {
-            'access_token': FB_PAGE_TOKEN,
-            'message': testo,
-            'attached_media': json.dumps(attached_media)
-        }
-        r = requests.post(url_feed, data=payload, timeout=60)
-        if r.status_code == 200:
-            post_id = r.json().get('id', '')
-            link = f"https://www.facebook.com/{post_id}"
-            print(f"✅ Carosello FB pubblicato con successo: {link}")
-            return link
-        else:
-            print(f"❌ Errore pubblicazione carosello FB ({r.status_code}): {r.text}")
-            return ""
-    except Exception as e:
-        print(f"❌ Errore Facebook Foto: {e}")
-        return ""
-
+    """Upload foto Facebook disattivato: attivo solo Telegram."""
+    print("🔒 [SOLO TELEGRAM] Upload foto Facebook disattivato.")
+    return "skip (solo Telegram)"
 
 def upload_instagram_foto(foto_urls, caption):
-    """Pubblica un post (singolo o carosello) con foto su Instagram Page."""
-    print("📸 Upload Foto Instagram...")
-    if not IG_USER_ID or not FB_PAGE_TOKEN:
-        print("⚠️ Instagram: IG_USER_ID o Token mancanti")
-        return ""
-        
-    testo = caption + BRANDING
-    try:
-        # Se c'è una sola foto, pubblichiamo come foto singola
-        if len(foto_urls) == 1:
-            url = f"https://graph.facebook.com/v21.0/{IG_USER_ID}/media"
-            payload = {
-                'image_url': foto_urls[0],
-                'caption': testo,
-                'access_token': FB_PAGE_TOKEN
-            }
-            r = requests.post(url, data=payload, timeout=60)
-            if r.status_code != 200:
-                print(f"❌ Errore creazione container IG ({r.status_code}): {r.text}")
-                return ""
-            container_id = r.json().get('id')
-            
-            # Pubblica
-            return pubblica_container_instagram(container_id)
-            
-        # Se ci sono più foto, creiamo gli elementi del carosello
-        children_ids = []
-        for img_url in foto_urls:
-            url = f"https://graph.facebook.com/v21.0/{IG_USER_ID}/media"
-            payload = {
-                'image_url': img_url,
-                'is_carousel_item': 'true',
-                'access_token': FB_PAGE_TOKEN
-            }
-            r = requests.post(url, data=payload, timeout=60)
-            if r.status_code == 200:
-                children_ids.append(r.json().get('id'))
-            else:
-                print(f"⚠️ Errore creazione item carosello IG ({r.status_code}): {r.text}")
-                
-        if not children_ids:
-            print("❌ Nessun item carosello creato su IG")
-            return ""
-            
-        # Crea container carosello padre
-        url_parent = f"https://graph.facebook.com/v21.0/{IG_USER_ID}/media"
-        payload_parent = {
-            'media_type': 'CAROUSEL',
-            'children': json.dumps(children_ids),
-            'caption': testo,
-            'access_token': FB_PAGE_TOKEN
-        }
-        r = requests.post(url_parent, data=payload_parent, timeout=60)
-        if r.status_code != 200:
-            print(f"❌ Errore creazione container carosello IG ({r.status_code}): {r.text}")
-            return ""
-        parent_container_id = r.json().get('id')
-        
-        # Pubblica carosello
-        return pubblica_container_instagram(parent_container_id)
-    except Exception as e:
-        print(f"❌ Errore Instagram Foto: {e}")
-        return ""
-
-
-def pubblica_container_instagram(container_id):
-    """Helper per fare il publish di un container IG e attendere la pubblicazione."""
-    url_publish = f"https://graph.facebook.com/v21.0/{IG_USER_ID}/media_publish"
-    # Attendiamo qualche secondo che IG elabori le foto
-    time.sleep(10)
-    for _ in range(6):
-        r = requests.post(url_publish, data={'creation_id': container_id, 'access_token': FB_PAGE_TOKEN}, timeout=60)
-        if r.status_code == 200:
-            post_id = r.json().get('id', '')
-            link = f"https://www.instagram.com/p/{post_id}"
-            print(f"✅ Instagram pubblicato con successo: {link}")
-            return link
-        else:
-            print(f"⏳ IG in elaborazione... riprovo ({r.status_code})")
-            time.sleep(10)
-    return ""
-
+    """Upload foto Instagram disattivato: attivo solo Telegram."""
+    print("🔒 [SOLO TELEGRAM] Upload foto Instagram disattivato.")
+    return "skip (solo Telegram)"
 
 def invia_telegram_foto(foto_files, caption):
     """Invia le foto su Telegram Channel come gruppo multimediale o foto singola."""
@@ -1855,21 +1433,12 @@ def pipeline_post_automatico(forza_id=None):
 
 
 def send_whatsapp_message_direct(chat_id, text):
-    """Metodo diretto per inviare un messaggio WhatsApp di testo usando le API Meta in bot.py."""
-    if not WHATSAPP_TOKEN or not WHATSAPP_PHONE_ID:
-        print("⚠️ WhatsApp: credenziali mancanti")
-        return False
-    url = f"https://graph.facebook.com/v18.0/{WHATSAPP_PHONE_ID}/messages"
-    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": chat_id,
-        "type": "text",
-        "text": {"body": text}
-    }
-    r = requests.post(url, headers=headers, json=payload, timeout=30)
-    return r.status_code == 200
-
+    """Reindirizzato solo su Telegram (WhatsApp/Meta disattivati)."""
+    if TELEGRAM_TOKEN and CHAT_ID:
+        try:
+            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=15)
+        except Exception as e:
+            print(f"⚠️ Errore report Telegram: {e}")
 
 def main():
     print("🤖 Bot Pubblicazione Immobiliare — Avvio")
