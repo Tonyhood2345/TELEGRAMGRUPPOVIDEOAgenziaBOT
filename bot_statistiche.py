@@ -90,24 +90,7 @@ def main():
                 except Exception as e:
                     print(f"  ⚠️ Errore YouTube per riga {riga_foglio}: {e}")
 
-        # --- STATISTICHE FACEBOOK ---
-        if link_fb:
-            fb_id = extract_fb_id(link_fb)
-            if fb_id:
-                try:
-                    # Endpoint Graph API per ottenere i dati del video
-                    url = f"https://graph.facebook.com/v18.0/{fb_id}?fields=views,likes.summary(true),comments.summary(true),shares&access_token={FB_PAGE_TOKEN}"
-                    res = requests.get(url).json()
-                    
-                    tot_vis += res.get("views", 0)
-                    if "likes" in res:
-                        tot_like += res["likes"]["summary"]["total_count"]
-                    if "comments" in res:
-                        tot_comm += res["comments"]["summary"]["total_count"]
-                    if "shares" in res:
-                        tot_cond += res["shares"]["count"]
-                except Exception as e:
-                    print(f"  ⚠️ Errore Facebook per riga {riga_foglio}: {e}")
+        # --- STATISTICHE FACEBOOK (DISATTIVATO: ZERO CHIAMATE META) ---
 
         # Calcolo Engagement Totale (somma delle interazioni attive)
         tot_eng = tot_like + tot_comm + tot_cond
